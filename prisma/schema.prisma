@@ -1,0 +1,512 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum AccountType {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum AuthMethod {
+  EMAIL
+  PASSKEY
+  GOOGLE
+  WALLET_CONNECT
+  METAMASK
+  COINBASE
+  EXTERNAL_EOA
+}
+
+enum OnboardingStep {
+  NOT_STARTED
+  TYPE_SELECTED
+  PROFILE_COMPLETE
+  HUMANITY_PENDING
+  HUMANITY_COMPLETE
+  KYC_PENDING
+  KYB_PENDING
+  LP_COMPLETE
+  CREDIT_SCORE_PENDING
+  COMPLETE
+}
+
+enum CompanySize {
+  MICRO
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+enum VerificationType {
+  HUMANITY
+  KYC_INDIVIDUAL
+  KYB_BUSINESS
+  CREDIT_SCORE
+}
+
+enum VerificationProvider {
+  ZKPASSPORT
+  VERIFF
+  SUMSUB
+  INTERNAL
+}
+
+enum VerificationStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  EXPIRED
+  RESUBMISSION_REQUESTED
+}
+
+enum CreditScoreStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  NFT_REQUESTED
+  COMPLETE
+}
+
+enum BankAccountType {
+  SAVINGS
+  CHECKING
+  BUSINESS
+}
+
+enum BankAccountStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  DISABLED
+}
+
+enum ContactType {
+  PROVIDER
+  FRIEND
+  CLIENT
+  FAMILY
+  OTHER
+}
+
+enum DocumentCategory {
+  GENERAL
+  VAULT_CONTRACT
+  KYC_DOCUMENT
+  KYB_DOCUMENT
+  INCOME_STATEMENT
+  BALANCE_SHEET
+  CASH_FLOW
+  CREDIT_SCORE_REQUEST
+  FUNDING_REQUEST
+  NFT_METADATA
+}
+
+enum OtcOrderType {
+  BUY
+  SELL
+}
+
+enum OtcOrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum FundingRequestStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  VAULT_CREATED
+}
+
+enum NotificationChannel {
+  EMAIL
+  TELEGRAM
+}
+
+enum AdminRoleType {
+  VIEWER
+  VERIFIER
+  SUPER_ADMIN
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model User {
+  id             String         @id @default(cuid())
+  walletAddress  String         @unique
+  smartAccount   String?        @unique
+  authMethod     AuthMethod     @default(EXTERNAL_EOA)
+  chainId        Int            @default(8453)
+  nonce          String?
+
+  accountType    AccountType?
+  onboardingStep OnboardingStep @default(NOT_STARTED)
+  onboardedAt    DateTime?
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  individualProfile   IndividualProfile?
+  businessProfile     BusinessProfile?
+  reputation          ReputationCache?
+  verifications       Verification[]
+  creditScoreRequests CreditScoreRequest[]
+  bankAccounts        BankAccount[]
+  contacts            Contact[]
+  documents           Document[]
+  otcOrders           OtcOrder[]
+  fundingRequests     FundingRequest[]
+  notifications       NotificationLog[]
+  adminRole           AdminRole?
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INDIVIDUAL PROFILE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model IndividualProfile {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName          String?
+  lastName           String?
+  displayName        String?
+  dateOfBirth        DateTime?
+  nationality        String?
+  countryOfResidence String?
+
+  email              String?
+  phone              String?
+  telegram           String?
+  twitter            String?
+  linkedin           String?
+  avatarUrl          String?
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BUSINESS PROFILE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BusinessProfile {
+  id                 String      @id @default(cuid())
+  userId             String      @unique
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyName        String?
+  legalName          String?
+  taxId              String?
+  registrationNumber String?
+  industry           String?
+  companySize        CompanySize?
+  foundedYear        Int?
+  website            String?
+  description        String?
+
+  country            String?
+  city               String?
+  address            String?
+  postalCode         String?
+
+  email              String?
+  phone              String?
+  telegram           String?
+  linkedin           String?
+  logoUrl            String?
+
+  repFirstName       String?
+  repLastName        String?
+  repTitle           String?
+  repEmail           String?
+  repPhone           String?
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REPUTATION CACHE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ReputationCache {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tier                  Int      @default(0)
+  tierName              String   @default("None")
+
+  passportBalance       String   @default("0")
+  lpIndividualsBalance  String   @default("0")
+  lpBusinessBalance     String   @default("0")
+  ecreditscoringBalance String   @default("0")
+
+  canAccessTreasury     Boolean  @default(false)
+  canInvestInVaults     Boolean  @default(false)
+  canAccessLPPools      Boolean  @default(false)
+  canRequestCreditScore Boolean  @default(false)
+  canCreateVaults       Boolean  @default(false)
+  canAccessFunding      Boolean  @default(false)
+
+  lastSyncedAt          DateTime @default(now())
+  syncedFromChainId     Int      @default(8453)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VERIFICATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model Verification {
+  id              String               @id @default(cuid())
+  userId          String
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type            VerificationType
+  provider        VerificationProvider
+  sessionId       String               @unique
+  status          VerificationStatus   @default(PENDING)
+
+  veriffUrl       String?
+  applicantId     String?
+  levelName       String?
+  zkProofHash     String?
+
+  rejectionReason String?
+  nftTokenId      String?
+  processedAt     DateTime?
+  processedBy     String?
+
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CREDIT SCORE REQUEST
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model CreditScoreRequest {
+  id              String            @id @default(cuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  incomeStatementCid   String?
+  balanceSheetCid      String?
+  cashFlowCid          String?
+  period               String?
+
+  annualRevenue        String?
+  netProfit            String?
+  totalAssets          String?
+  totalLiabilities     String?
+  employeeCount        Int?
+  yearsOperating       Int?
+  existingDebt         String?
+  monthlyExpenses      String?
+  additionalContext    String?
+
+  status               CreditScoreStatus @default(PENDING)
+  score                Int?
+  rating               String?
+  approved             Boolean?
+  maxCreditLimit       String?
+  analysisNotes        String?
+  rejectionReason      String?
+
+  n8nExecutionId       String?
+  submittedToN8nAt     DateTime?
+  n8nCallbackAt        DateTime?
+
+  nftTokenId           String?
+  nftMintedAt          DateTime?
+
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BANK ACCOUNT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BankAccount {
+  id                     String            @id @default(cuid())
+  userId                 String
+  user                   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accountName            String
+  bankName               String
+  accountNumberMasked    String
+  accountNumberEncrypted String?
+  accountType            BankAccountType
+  currency               String            @default("COP")
+  isDefault              Boolean           @default(false)
+  holderName             String?
+
+  status                 BankAccountStatus @default(PENDING)
+  verifiedAt             DateTime?
+  verifiedBy             String?
+
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTACT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model Contact {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  address   String
+  type      ContactType @default(OTHER)
+  notes     String?
+  avatarUrl String?
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([userId, address])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOCUMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model Document {
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  filename      String
+  mimeType      String
+  sizeBytes     Int
+  ipfsCid       String
+  ipfsUrl       String
+  pinataGroupId String?
+  documentHash  String?
+  category      DocumentCategory @default(GENERAL)
+
+  vaultId       String?
+  contractId    String?
+
+  createdAt     DateTime         @default(now())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OTC ORDER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model OtcOrder {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  orderType    OtcOrderType
+  tokenIn      String
+  tokenOut     String
+  amountIn     String
+  amountOut    String?
+  priceUSD     String?
+  network      String
+
+  status       OtcOrderStatus @default(PENDING)
+  telegramSent Boolean        @default(false)
+  emailSent    Boolean        @default(false)
+  notes        String?
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FUNDING REQUEST (Business only)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model FundingRequest {
+  id           String               @id @default(cuid())
+  userId       String
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  amount       String
+  currency     String               @default("USDC")
+  purpose      String
+  term         Int?
+  interestRate String?
+  collateral   String?
+
+  status       FundingRequestStatus @default(PENDING)
+  vaultId      String?
+
+  adminNotes   String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTIFICATION LOG
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model NotificationLog {
+  id         String              @id @default(cuid())
+  userId     String
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  channel    NotificationChannel
+  subject    String
+  body       String
+  recipient  String
+  status     String
+  externalId String?
+  error      String?
+
+  createdAt  DateTime            @default(now())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXCHANGE RATE CACHE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  pair      String   @unique
+  rate      Float
+  source    String
+  updatedAt DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADMIN ROLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model AdminRole {
+  id        String        @id @default(cuid())
+  userId    String        @unique
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      AdminRoleType @default(VIEWER)
+  grantedBy String
+  createdAt DateTime      @default(now())
+}
