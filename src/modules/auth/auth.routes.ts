@@ -42,6 +42,22 @@ export async function authRoutes(app: FastifyInstance) {
     handler: ctrl.verify,
   })
 
+  // POST /auth/refresh
+  app.post('/auth/refresh', {
+    schema: {
+      tags: ['Auth'],
+      summary: 'Refresh access token using a valid refresh token',
+      body: {
+        type: 'object',
+        required: ['refreshToken'],
+        properties: {
+          refreshToken: { type: 'string' },
+        },
+      },
+    },
+    handler: ctrl.refresh,
+  })
+
   // POST /auth/logout
   app.post('/auth/logout', {
     schema: {

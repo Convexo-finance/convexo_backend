@@ -1,132 +1,108 @@
-# Convexo Backend API
+# Convexo Backend
 
-Production-ready REST API for the Convexo Protocol. Built with **Fastify 5**, **Prisma**, **PostgreSQL**, and **Redis**.
+Fastify 5 REST API for the Convexo Protocol — authentication, onboarding, KYC/KYB verification, credit scoring, OTC orders, and all user data operations.
 
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Convexo Backend                          │
-│                                                                 │
-│  ┌──────────┐   ┌───────────┐   ┌──────────────┐              │
-│  │  Fastify │   │  Prisma   │   │    Redis     │              │
-│  │   API    │──▶│ (Postgres)│   │ (Nonce/JWT   │              │
-│  │          │   │           │   │  Cache)      │              │
-│  └────┬─────┘   └───────────┘   └──────────────┘              │
-│       │                                                         │
-│  ┌────▼────────────────────────────────────────────┐           │
-│  │                    Modules                       │           │
-│  │  auth │ users │ onboarding │ profile │ verific. │           │
-│  └─────────────────────────────────────────────────┘           │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────┐          │
-│  │                   Webhooks                        │          │
-│  │     /webhooks/veriff  /webhooks/sumsub            │          │
-│  │     /webhooks/n8n/credit-score                    │          │
-│  └──────────────────────────────────────────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-```
+[![Fastify](https://img.shields.io/badge/Fastify-5-black)](https://fastify.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org)
+[![Prisma](https://img.shields.io/badge/Prisma-5-blue)](https://prisma.io)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)](https://postgresql.org)
 
 ---
 
-## Account Type Flow
+## Table of Contents
 
-```
-User connects wallet
-        │
-        ▼
-  ┌─────────────┐
-  │  Onboarding │
-  │  TYPE SELECT│
-  └──────┬──────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-INDIVIDUAL  BUSINESS
-    │             │
-    ▼             ▼
-Profile       Profile
-    │             │
-    ▼             ▼
- Veriff        Sumsub
- (KYC)         (KYB)
-    │             │
-    ▼             ▼
-LP_COMPLETE   Credit Score
-              (n8n + docs)
-                  │
-                  ▼
-               COMPLETE
-```
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [API Modules](#api-modules)
+- [Database Schema](#database-schema)
+- [Webhook Configuration](#webhook-configuration)
+- [Credit Score Flow](#credit-score-flow)
+- [Admin Bootstrap](#admin-bootstrap)
+- [Docker Deployment](#docker-deployment)
+- [Deployment Checklist](#deployment-checklist)
 
 ---
 
-## OnboardingStep State Machine
+## Architecture
 
 ```
-NOT_STARTED
-    │
-    ▼
-TYPE_SELECTED  ◄─── POST /onboarding/type
-    │
-    ▼
-PROFILE_COMPLETE  ◄─── POST /onboarding/profile
-    │
-    ▼
-HUMANITY_PENDING  (reserved for ZKPassport)
-    │
-    ▼
-HUMANITY_COMPLETE
-    │
-    ├──[INDIVIDUAL]──▶ KYC_PENDING  ◄─── POST /verification/kyc/start
-    │                       │
-    │                       ▼
-    │                  LP_COMPLETE  ◄─── Veriff webhook
-    │
-    └──[BUSINESS]───▶ KYB_PENDING  ◄─── POST /verification/kyb/start
-                           │
-                           ▼
-                      LP_COMPLETE  ◄─── Sumsub webhook
-                           │
-                           ▼
-                  CREDIT_SCORE_PENDING  ◄─── POST /verification/credit-score/submit
-                           │
-                           ▼
-                        COMPLETE  ◄─── n8n callback
+                    ┌─────────────────────────────────────────┐
+                    │         Fastify 5  (:3001)               │
+                    │                                          │
+                    │  Plugins: cors · rate-limit · multipart  │
+                    │           swagger · jwt-auth             │
+                    └────────────────┬────────────────────────┘
+                                     │
+          ┌──────────────────────────┼──────────────────────────┐
+          │                          │                          │
+ ┌────────▼──────┐         ┌─────────▼──────┐        ┌────────▼────────┐
+ │  13 Modules   │         │  3 Webhooks    │        │  Swagger /docs  │
+ │  (JWT-gated)  │         │  (HMAC-signed) │        │  (dev only)     │
+ └────────┬──────┘         └─────────┬──────┘        └─────────────────┘
+          │                          │
+ ┌────────▼──────────────────────────▼──────┐
+ │            Prisma 5  +  PostgreSQL 16     │
+ │           + Redis (ioredis)               │
+ └───────────────────────────────────────────┘
+          │
+ ┌────────▼────────────────────────────────────────────────┐
+ │  External Services                                       │
+ │  Veriff (KYC) · Sumsub (KYB) · Pinata (IPFS)           │
+ │  n8n (AI credit score) · Resend (email) · Telegram      │
+ │  viem (blockchain reads — reputation sync)              │
+ └─────────────────────────────────────────────────────────┘
 ```
 
----
+### Auth Flow
 
-## NFT Tier System
-
-| Tier | Name            | Required For                        |
-|------|-----------------|-------------------------------------|
-| 0    | None            | Basic access                        |
-| 1    | ConvexoPassport | Treasury, Investments               |
-| 2    | LP Individual   | LP Pools (Individual path)          |
-| 2    | LP Business     | LP Pools (Business path)            |
-| 3    | Ecreditscoring  | Vault creation, Funding             |
+```
+Client                           Backend                       Blockchain
+  │                                │                               │
+  │   GET /auth/nonce?address=0x.. │                               │
+  │──────────────────────────────▶ │                               │
+  │   ◀── { nonce }                │                               │
+  │                                │                               │
+  │   POST /auth/verify            │                               │
+  │   { message, signature,        │                               │
+  │     address, chainId }         │                               │
+  │──────────────────────────────▶ │                               │
+  │                                │  verify EIP-4361 signature    │
+  │                                │  upsert User in DB            │
+  │   ◀── { accessToken,           │                               │
+  │          refreshToken }        │                               │
+  │                                │                               │
+  │   POST /auth/refresh           │  (when accessToken expires)   │
+  │   { refreshToken }             │                               │
+  │──────────────────────────────▶ │                               │
+  │   ◀── { accessToken }          │                               │
+```
 
 ---
 
 ## Tech Stack
 
-| Layer            | Technology                          |
-|------------------|-------------------------------------|
-| Framework        | Fastify 5 + TypeScript              |
-| ORM              | Prisma 5 + PostgreSQL 16            |
-| Cache/Nonce      | ioredis 5 + Redis 7                 |
-| Auth             | SIWE (Sign-In With Ethereum) + JWT  |
-| KYC (Individual) | Veriff                              |
-| KYB (Business)   | Sumsub                              |
-| Credit Score     | n8n automation                      |
-| Documents        | Pinata IPFS                         |
-| Email            | Resend                              |
-| Admin Alerts     | Telegram Bot API                    |
-| Validation       | Zod                                 |
-| Blockchain       | viem (read-only)                    |
+| Layer | Technology |
+|---|---|
+| Framework | Fastify 5 + TypeScript |
+| ORM | Prisma 5 + PostgreSQL 16 |
+| Cache | Redis (ioredis 5) |
+| Auth | SIWE (EIP-4361) · JWT · Refresh tokens |
+| Validation | Zod (env + schemas) |
+| Logging | Pino + pino-pretty |
+| API Docs | @fastify/swagger + @fastify/swagger-ui |
+| Rate Limiting | @fastify/rate-limit |
+| File Uploads | @fastify/multipart |
+| Email | Resend |
+| Storage | Pinata IPFS SDK |
+| KYC | Veriff REST API |
+| KYB | Sumsub REST API |
+| AI Credit Score | n8n webhook automation |
+| Notifications | Telegram Bot API |
+| Blockchain | viem (reputation reads from Base mainnet) |
+| Containerization | Docker + Docker Compose |
 
 ---
 
@@ -134,63 +110,56 @@ HUMANITY_COMPLETE
 
 ```
 convexo-backend/
-├── prisma/
-│   └── schema.prisma              # 15 models, 14 enums
 ├── src/
-│   ├── index.ts                   # Entry point + graceful shutdown
-│   ├── app.ts                     # Fastify factory + plugins + routes
-│   ├── types.d.ts                 # JWT payload + FastifyRequest augmentations
+│   ├── index.ts                    # Entry point — connect DB + Redis, start server
+│   ├── app.ts                      # Fastify app factory — plugins + routes registration
+│   ├── types.ts                    # Global type augmentations (rawBody on FastifyRequest)
+│   │
 │   ├── config/
-│   │   ├── env.ts                 # Zod-validated env (exits on error)
-│   │   ├── database.ts            # Prisma singleton
-│   │   ├── redis.ts               # ioredis client + key helpers + TTL constants
-│   │   └── chains.ts              # viem Chain configs (Base, Unichain, etc.)
-│   ├── shared/
-│   │   ├── errors.ts              # AppError hierarchy
-│   │   ├── logger.ts              # pino + pino-pretty in dev
-│   │   ├── pagination.ts          # Cursor/offset pagination helpers
-│   │   └── viem.ts               # Lazy public clients per chainId
+│   │   ├── env.ts                  # Zod-validated environment config (fails fast on bad env)
+│   │   ├── database.ts             # Prisma client connect/disconnect
+│   │   └── redis.ts                # ioredis singleton
+│   │
 │   ├── plugins/
-│   │   ├── auth.ts               # @fastify/jwt
-│   │   ├── cors.ts
-│   │   ├── multipart.ts          # @fastify/multipart (20MB)
-│   │   ├── rateLimit.ts          # Redis-backed rate limiting
-│   │   └── swagger.ts            # OpenAPI 3.0 (/docs in dev)
+│   │   ├── auth.ts                 # JWT plugin + requireAuth decorator
+│   │   ├── cors.ts                 # CORS (allow frontend origin)
+│   │   ├── multipart.ts            # File upload config
+│   │   ├── rateLimit.ts            # Rate limiting (global + per-route overrides)
+│   │   └── swagger.ts              # OpenAPI spec + Swagger UI at /docs
+│   │
 │   ├── middleware/
-│   │   ├── requireAuth.ts        # JWT verify + Redis blacklist
-│   │   ├── requireOnboarded.ts   # Blocks if not COMPLETE
-│   │   ├── requireAccountType.ts # requireIndividual / requireBusiness
-│   │   ├── requireAdmin.ts       # VIEWER < VERIFIER < SUPER_ADMIN
-│   │   └── requireTier.ts        # NFT tier gate
+│   │   └── requireRole.ts          # SUPER_ADMIN / VERIFIER role check
+│   │
 │   ├── modules/
-│   │   ├── auth/                 # SIWE nonce, verify, JWT
-│   │   ├── users/                # /users/me CRUD
-│   │   ├── onboarding/           # Type + profile submission
-│   │   ├── profile/              # Individual & Business profiles
-│   │   ├── notifications/        # Resend email + Telegram alerts (internal service)
-│   │   ├── verification/
-│   │   │   ├── verification.schema.ts
-│   │   │   ├── verification.service.ts   # Aggregate status
-│   │   │   ├── verification.controller.ts
-│   │   │   ├── verification.routes.ts
-│   │   │   ├── veriff.service.ts         # KYC (Individual)
-│   │   │   ├── sumsub.service.ts         # KYB (Business)
-│   │   │   └── credit-score.service.ts   # Pinata + n8n
-│   │   ├── bank-accounts/        # AES-256-GCM encrypted account numbers
-│   │   ├── contacts/             # Wallet address book
-│   │   ├── rates/                # Admin-set exchange rates (Redis-cached 10 min)
-│   │   ├── otc/                  # OTC orders with auto amountOut calc
-│   │   ├── documents/            # Pinata IPFS uploads with SHA-256 hash
-│   │   ├── reputation/           # On-chain NFT tier sync via viem
-│   │   ├── funding/              # Business funding requests
-│   │   └── admin/                # User mgmt, verif overrides, role management
-│   └── webhooks/
-│       ├── veriff.webhook.ts     # HMAC-verified Veriff callbacks
-│       ├── sumsub.webhook.ts     # HMAC-verified Sumsub callbacks
-│       └── n8n.webhook.ts        # Bearer-verified n8n credit score callback
-├── docker-compose.yml
+│   │   ├── auth/                   # SIWE sign-in, nonce, logout, refresh
+│   │   ├── users/                  # GET/PUT/DELETE /users/me
+│   │   ├── onboarding/             # 5-step onboarding state machine
+│   │   ├── profile/                # Individual or Business profile
+│   │   ├── verification/           # Veriff · Sumsub · n8n credit score
+│   │   ├── bank-accounts/          # AES-256 encrypted bank accounts
+│   │   ├── contacts/               # Wallet address book
+│   │   ├── rates/                  # Exchange rate cache
+│   │   ├── otc/                    # OTC trade orders
+│   │   ├── documents/              # IPFS document references
+│   │   ├── reputation/             # NFT tier sync (chain → DB)
+│   │   ├── funding/                # Vault funding requests (Business Tier 3)
+│   │   ├── notifications/          # Email + Telegram helpers
+│   │   └── admin/                  # Role management + user admin
+│   │
+│   ├── webhooks/
+│   │   ├── veriff.webhook.ts       # HMAC-SHA256 (x-hmac-signature)
+│   │   ├── sumsub.webhook.ts       # HMAC-SHA256-HEX (x-payload-digest)
+│   │   └── n8n.webhook.ts          # Bearer token auth (N8N_WEBHOOK_SECRET)
+│   │
+│   └── shared/
+│       ├── errors.ts               # AppError class with statusCode + code
+│       └── logger.ts               # Pino logger instance
+│
+├── prisma/
+│   └── schema.prisma               # 13 models, 17 enums
+│
+├── docker-compose.yml              # PostgreSQL 16 + Redis + app
 ├── Dockerfile
-├── .env.example
 ├── package.json
 └── tsconfig.json
 ```
@@ -199,6 +168,12 @@ convexo-backend/
 
 ## Quick Start
 
+### Prerequisites
+
+- Node.js 20+
+- PostgreSQL 16 (local or Docker)
+- Redis (local or Docker)
+
 ### 1. Install dependencies
 
 ```bash
@@ -206,258 +181,374 @@ cd convexo-backend
 npm install
 ```
 
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# Edit .env — minimum required:
-#   DATABASE_URL
-#   REDIS_URL
-#   JWT_SECRET (min 32 chars)
-```
-
-### 3. Start PostgreSQL + Redis
+### 2. Start infrastructure (Docker)
 
 ```bash
 docker-compose up -d postgres redis
 ```
 
-### 4. Run database migrations
+### 3. Configure environment
+
+```bash
+cp .env.example .env
+# Fill in required values — see Environment Variables below
+```
+
+### 4. Run migrations
 
 ```bash
 npm run db:migrate
+# → creates all tables, runs any pending migrations
 ```
 
-### 5. Start development server
+### 5. Start dev server
 
 ```bash
 npm run dev
+# → http://localhost:3001
+# → http://localhost:3001/docs (Swagger UI)
 ```
 
-API: `http://localhost:3001`
-Swagger: `http://localhost:3001/docs`
+### 6. Verify
+
+```bash
+curl http://localhost:3001/health
+# → { "status": "ok" }
+```
 
 ---
 
 ## NPM Scripts
 
-| Script                    | Description                                      |
-|---------------------------|--------------------------------------------------|
-| `npm run dev`             | Hot reload dev server (tsx watch)                |
-| `npm run build`           | Compile TypeScript → `dist/`                     |
-| `npm run start`           | Run compiled production build                    |
-| `npm run db:migrate`      | Apply migrations (dev — creates migration files) |
-| `npm run db:migrate:prod` | Apply migrations (production — no prompts)       |
-| `npm run db:generate`     | Regenerate Prisma client after schema changes    |
-| `npm run db:studio`       | Prisma Studio (visual database browser)          |
-| `npm run db:reset`        | Drop and recreate database (dev only)            |
+| Script | Description |
+|---|---|
+| `npm run dev` | Dev server with hot-reload (`tsx watch`) |
+| `npm run build` | Compile TypeScript to `dist/` |
+| `npm run start` | Start compiled production server |
+| `npm run db:generate` | Generate Prisma client after schema changes |
+| `npm run db:migrate` | Run migrations in development |
+| `npm run db:migrate:prod` | Run migrations in production (no prompt) |
+| `npm run db:studio` | Open Prisma Studio (database GUI) |
+| `npm run db:reset` | Drop + recreate DB (development only) |
 
 ---
 
 ## Environment Variables
 
-| Variable                   | Required | Description                                         |
-|----------------------------|----------|-----------------------------------------------------|
-| `DATABASE_URL`             | ✅       | PostgreSQL connection string                        |
-| `REDIS_URL`                | ✅       | Redis connection URL                                |
-| `JWT_SECRET`               | ✅       | Min 32 chars — signs all JWT tokens                 |
-| `JWT_EXPIRES_IN`           |          | Access token TTL (default: `7d`)                    |
-| `JWT_REFRESH_EXPIRES_IN`   |          | Refresh token TTL (default: `30d`)                  |
-| `APP_URL`                  |          | Public API URL (default: `http://localhost:3001`)   |
-| `FRONTEND_URL`             |          | Frontend URL used in email links                    |
-| `PINATA_JWT`               |          | Pinata API JWT — credit score document uploads      |
-| `PINATA_GATEWAY`           |          | Pinata IPFS gateway domain                          |
-| `VERIFF_API_KEY`           |          | Veriff API key — Individual KYC                     |
-| `VERIFF_WEBHOOK_SECRET`    |          | Veriff HMAC webhook secret                          |
-| `SUMSUB_APP_TOKEN`         |          | Sumsub app token — Business KYB                     |
-| `SUMSUB_SECRET_KEY`        |          | Sumsub secret key                                   |
-| `SUMSUB_WEBHOOK_SECRET`    |          | Sumsub HMAC webhook secret                          |
-| `N8N_WEBHOOK_URL`          |          | n8n automation trigger URL (credit score)           |
-| `N8N_WEBHOOK_SECRET`       |          | Bearer token for n8n callback auth                  |
-| `RESEND_API_KEY`           |          | Resend email API key                                |
-| `RESEND_FROM_EMAIL`        |          | Sender address (default: `notifications@convexo.io`) |
-| `TELEGRAM_BOT_TOKEN`       |          | Telegram bot token for admin alerts                 |
-| `TELEGRAM_ADMIN_CHAT_ID`   |          | Telegram chat ID for admin notifications            |
-| `ADMIN_WALLET_ADDRESSES`   |          | Comma-separated wallets seeded as SUPER_ADMIN       |
-| `BASE_MAINNET_RPC_URL`     |          | Base mainnet RPC endpoint                           |
-| `BASE_SEPOLIA_RPC_URL`     |          | Base Sepolia RPC endpoint                           |
-| `ENCRYPTION_KEY`           |          | 64-char hex key for bank account number encryption  |
+```env
+# ─── App ──────────────────────────────────────────────────────────────────────
+NODE_ENV=development
+PORT=3001
+APP_URL=http://localhost:3001
+FRONTEND_URL=http://localhost:3000
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+DATABASE_URL=postgresql://user:pass@localhost:5432/convexo
+
+# ─── Redis ────────────────────────────────────────────────────────────────────
+REDIS_URL=redis://localhost:6379
+
+# ─── Auth (min 32 chars each) ─────────────────────────────────────────────────
+JWT_SECRET=your_jwt_secret_minimum_32_characters_long
+JWT_EXPIRES_IN=7d
+JWT_REFRESH_EXPIRES_IN=30d
+
+# ─── KYC — Veriff ─────────────────────────────────────────────────────────────
+VERIFF_API_KEY=your_veriff_api_key
+VERIFF_BASE_URL=https://stationapi.veriff.com
+VERIFF_WEBHOOK_SECRET=your_veriff_webhook_secret
+
+# ─── KYB — Sumsub ─────────────────────────────────────────────────────────────
+SUMSUB_APP_TOKEN=your_sumsub_app_token
+SUMSUB_SECRET_KEY=your_sumsub_secret_key
+SUMSUB_BASE_URL=https://api.sumsub.com
+SUMSUB_WEBHOOK_SECRET=your_sumsub_webhook_secret
+
+# ─── AI Credit Score — n8n ────────────────────────────────────────────────────
+N8N_WEBHOOK_URL=https://your-n8n.com/webhook/credit-score
+N8N_WEBHOOK_SECRET=your_n8n_shared_secret
+
+# ─── Storage — Pinata IPFS ────────────────────────────────────────────────────
+PINATA_JWT=your_pinata_jwt_token
+PINATA_API_KEY=your_pinata_api_key
+PINATA_SECRET_KEY=your_pinata_secret_key
+PINATA_GATEWAY=your-gateway.mypinata.cloud
+
+# ─── Notifications ────────────────────────────────────────────────────────────
+RESEND_API_KEY=re_your_resend_api_key
+RESEND_FROM_EMAIL=notifications@convexo.io
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_OPS_CHAT_ID=your_ops_chat_id
+TELEGRAM_ADMIN_CHAT_ID=your_admin_chat_id
+
+# ─── Blockchain (for reputation reads) ────────────────────────────────────────
+BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/your_key
+
+# ─── Encryption (bank accounts — 64-char hex) ────────────────────────────────
+ENCRYPTION_KEY=your_64_char_hex_encryption_key
+
+# ─── Exchange Rates ───────────────────────────────────────────────────────────
+EXCHANGE_RATE_API_KEY=your_exchange_rate_api_key
+RATES_CACHE_TTL_SECONDS=600
+
+# ─── Admin Bootstrap ──────────────────────────────────────────────────────────
+ADMIN_WALLET_ADDRESSES=0xABC...,0xDEF...
+```
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `REDIS_URL` | ✅ | Redis connection URL |
+| `JWT_SECRET` | ✅ | JWT signing secret (min 32 chars) |
+| `VERIFF_API_KEY` | ✅ | Veriff API key for KYC sessions |
+| `VERIFF_WEBHOOK_SECRET` | ✅ | HMAC secret for Veriff webhooks |
+| `SUMSUB_APP_TOKEN` | ✅ | Sumsub app token for KYB sessions |
+| `SUMSUB_SECRET_KEY` | ✅ | Sumsub secret for API + HMAC signing |
+| `SUMSUB_WEBHOOK_SECRET` | ✅ | HMAC secret for Sumsub webhooks |
+| `N8N_WEBHOOK_URL` | ✅ | n8n webhook endpoint for credit score jobs |
+| `N8N_WEBHOOK_SECRET` | ✅ | Bearer token for n8n callback auth |
+| `PINATA_JWT` | ✅ | Pinata JWT for IPFS uploads |
+| `ENCRYPTION_KEY` | ✅ | 64-char hex key for AES-256 bank account encryption |
+| `ADMIN_WALLET_ADDRESSES` | | Comma-separated wallets bootstrapped as SUPER_ADMIN |
+| `RESEND_API_KEY` | | Email notifications |
+| `TELEGRAM_BOT_TOKEN` | | Telegram notifications |
 
 ---
 
-## API Reference
+## API Modules
+
+**Base URL:** `http://localhost:3001`  
+**Swagger UI:** `http://localhost:3001/docs` (development only)  
+**Auth header:** `Authorization: Bearer <accessToken>`
+
+### Response format
+
+```typescript
+// Success
+{ data: T, message?: string }
+
+// Error
+{ error: string, code: string, statusCode: number }
+```
 
 ### Auth
 
-| Method | Path          | Auth | Description                        |
-|--------|---------------|------|------------------------------------|
-| GET    | `/auth/nonce` | —    | Get SIWE nonce for a wallet address |
-| POST   | `/auth/verify`| —    | Verify SIWE signature, receive JWT |
-| POST   | `/auth/logout`| ✅   | Blacklist current JWT              |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/auth/nonce` | — | Get sign-in nonce for an address |
+| POST | `/auth/verify` | — | Verify SIWE signature → issue tokens |
+| POST | `/auth/refresh` | — | Refresh access token |
+| POST | `/auth/logout` | ✅ | Invalidate refresh token |
 
 ### Users
 
-| Method | Path        | Auth | Description       |
-|--------|-------------|------|-------------------|
-| GET    | `/users/me` | ✅   | Get current user  |
-| PUT    | `/users/me` | ✅   | Update user       |
-| DELETE | `/users/me` | ✅   | Delete account    |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/users/me` | ✅ | Get current user |
+| PUT | `/users/me` | ✅ | Update user (email, locale) |
+| DELETE | `/users/me` | ✅ | Delete account (GDPR) |
 
 ### Onboarding
 
-| Method | Path                  | Auth | Description                            |
-|--------|-----------------------|------|----------------------------------------|
-| GET    | `/onboarding/status`  | ✅   | Get current step + what to do next     |
-| POST   | `/onboarding/type`    | ✅   | Set account type (INDIVIDUAL/BUSINESS) |
-| POST   | `/onboarding/profile` | ✅   | Submit individual or business profile  |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/onboarding/status` | ✅ | Get current onboarding step + account type |
+| POST | `/onboarding/type` | ✅ | Set INDIVIDUAL or BUSINESS |
+| POST | `/onboarding/profile` | ✅ | Submit profile form |
+| GET | `/onboarding/path` | ✅ | Get verification path guide |
 
 ### Profile
 
-| Method | Path       | Auth | Description              |
-|--------|------------|------|--------------------------|
-| GET    | `/profile` | ✅   | Get profile (type-aware) |
-| PUT    | `/profile` | ✅   | Update profile           |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/profile` | ✅ | Get full profile (Individual or Business) |
+| PUT | `/profile` | ✅ | Update profile fields |
 
 ### Verification
 
-| Method | Path                                | Auth | Type       | Description                       |
-|--------|-------------------------------------|------|------------|-----------------------------------|
-| GET    | `/verification/status`              | ✅   | Any        | All verification statuses         |
-| POST   | `/verification/kyc/start`           | ✅   | Individual | Start Veriff KYC → returns URL    |
-| GET    | `/verification/kyc/status`          | ✅   | Individual | KYC status                        |
-| POST   | `/verification/kyb/start`           | ✅   | Business   | Start Sumsub KYB → SDK token      |
-| GET    | `/verification/kyb/status`          | ✅   | Business   | KYB status                        |
-| POST   | `/verification/credit-score/submit` | ✅   | Business   | Upload 3 docs + form (multipart)  |
-| GET    | `/verification/credit-score/status` | ✅   | Business   | Credit score request status       |
-
-### Reputation
-
-| Method | Path               | Auth | Description                                  |
-|--------|--------------------|------|----------------------------------------------|
-| GET    | `/reputation`      | ✅   | Get cached NFT tier for current user         |
-| POST   | `/reputation/sync` | ✅   | Read NFT balances from chain, update cache   |
-
-> `POST /reputation/sync` accepts `{ chainId?: number }` (defaults to 8453 — Base Mainnet).
-> Reads `balanceOf` for all 4 NFT contracts and computes tier + permissions.
-
-### Funding (Business only)
-
-| Method | Path                                    | Auth | Role      | Description                        |
-|--------|-----------------------------------------|------|-----------|------------------------------------|
-| POST   | `/funding/requests`                     | ✅   | Business  | Submit a funding request           |
-| GET    | `/funding/requests`                     | ✅   | Business  | List my funding requests           |
-| GET    | `/funding/requests/:id`                 | ✅   | Business  | Get a single funding request       |
-| GET    | `/admin/funding/requests`               | ✅   | VIEWER+   | List all funding requests          |
-| PUT    | `/admin/funding/requests/:id/review`    | ✅   | VERIFIER+ | Approve / reject a funding request |
-
-### Admin Panel
-
-**Users**
-
-| Method | Path                | Auth | Role    | Description              |
-|--------|---------------------|------|---------|--------------------------|
-| GET    | `/admin/users`      | ✅   | VIEWER+ | List users (searchable)  |
-| GET    | `/admin/users/:id`  | ✅   | VIEWER+ | Get full user details    |
-
-**Admin Roles**
-
-| Method | Path                     | Auth | Role        | Description           |
-|--------|--------------------------|------|-------------|-----------------------|
-| POST   | `/admin/roles`           | ✅   | SUPER_ADMIN | Grant admin role      |
-| DELETE | `/admin/roles/:userId`   | ✅   | SUPER_ADMIN | Revoke admin role     |
-
-**Verifications**
-
-| Method | Path                               | Auth | Role      | Description                         |
-|--------|------------------------------------|------|-----------|-------------------------------------|
-| GET    | `/admin/verifications`             | ✅   | VIEWER+   | List all verifications              |
-| PUT    | `/admin/verifications/:id/status`  | ✅   | VERIFIER+ | Manually override verification      |
-| PUT    | `/admin/verifications/:id/nft`     | ✅   | VERIFIER+ | Record NFT token ID after minting   |
-
-**Credit Score**
-
-| Method | Path                                       | Auth | Role      | Description                           |
-|--------|--------------------------------------------|------|-----------|---------------------------------------|
-| GET    | `/admin/credit-score-requests`             | ✅   | VIEWER+   | List all credit score requests        |
-| PUT    | `/admin/credit-score-requests/:id/result`  | ✅   | VERIFIER+ | Manually set score result             |
-| PUT    | `/admin/credit-score-requests/:id/nft`     | ✅   | VERIFIER+ | Record NFT token ID after minting     |
-
-### Exchange Rates
-
-| Method | Path                | Auth  | Role      | Description                       |
-|--------|---------------------|-------|-----------|-----------------------------------|
-| GET    | `/rates`            | —     | Public    | List all configured rates         |
-| GET    | `/rates/:pair`      | —     | Public    | Get rate for pair (e.g. USD-COP)  |
-| POST   | `/admin/rates`      | ✅    | VERIFIER+ | Create or update a rate           |
-| DELETE | `/admin/rates/:pair`| ✅    | VERIFIER+ | Remove a rate pair                |
-
-> Rates are Redis-cached for 10 minutes. `POST /admin/rates` busts the cache immediately.
-> Pair format: `FROM-TO` in uppercase, e.g. `USD-COP`, `ETH-USDC`, `BTC-USD`.
-
-### OTC Orders
-
-| Method | Path                          | Auth | Role      | Description                       |
-|--------|-------------------------------|------|-----------|-----------------------------------|
-| POST   | `/otc/orders`                 | ✅   | Any       | Submit a new OTC order            |
-| GET    | `/otc/orders`                 | ✅   | Any       | List my OTC orders                |
-| GET    | `/otc/orders/:id`             | ✅   | Any       | Get a single OTC order            |
-| GET    | `/admin/otc/orders`           | ✅   | VIEWER+   | List all OTC orders               |
-| PUT    | `/admin/otc/orders/:id/status`| ✅   | VERIFIER+ | Update order status               |
-
-> On order creation: `amountOut` is auto-calculated from admin-set rates (if the pair is configured). Admin + user are notified automatically via Telegram and email. Status changes also trigger email notifications to the user.
-
-### Documents
-
-| Method | Path             | Auth | Description                                           |
-|--------|------------------|------|-------------------------------------------------------|
-| POST   | `/documents`     | ✅   | Upload a document to Pinata IPFS (multipart)          |
-| GET    | `/documents`     | ✅   | List my documents (filter by `category`)              |
-| GET    | `/documents/:id` | ✅   | Get a document record                                 |
-| DELETE | `/documents/:id` | ✅   | Delete document record (IPFS content stays immutable) |
-
-> Upload accepts `multipart/form-data` with fields: `file` (required) and `category` (optional, one of: GENERAL, KYC_DOCUMENT, KYB_DOCUMENT, INCOME_STATEMENT, BALANCE_SHEET, CASH_FLOW, etc.).
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/verification/veriff/session` | ✅ | Create Veriff KYC session |
+| GET | `/verification/veriff/status` | ✅ | Get KYC status |
+| POST | `/verification/sumsub/token` | ✅ | Get Sumsub SDK token |
+| GET | `/verification/sumsub/status` | ✅ | Get KYB status |
+| POST | `/verification/credit-score/submit` | ✅ | Upload 3 PDFs + business fields |
+| GET | `/verification/credit-score/status` | ✅ | Poll credit score result |
+| GET | `/verification/status` | ✅ | Summary of all verification statuses |
 
 ### Bank Accounts
 
-| Method | Path                         | Auth | Description                      |
-|--------|------------------------------|------|----------------------------------|
-| GET    | `/bank-accounts`             | ✅   | List all bank accounts           |
-| POST   | `/bank-accounts`             | ✅   | Add a bank account               |
-| PUT    | `/bank-accounts/:id`         | ✅   | Update a bank account            |
-| DELETE | `/bank-accounts/:id`         | ✅   | Delete a bank account            |
-| POST   | `/bank-accounts/:id/default` | ✅   | Set as default account           |
-
-> Account numbers are AES-256-GCM encrypted at rest and returned masked (`****4521`). Requires `ENCRYPTION_KEY` (64-char hex) in `.env`.
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/bank-accounts` | ✅ | List bank accounts (decrypted) |
+| POST | `/bank-accounts` | ✅ | Create bank account (AES-256 encrypted) |
+| PUT | `/bank-accounts/:id` | ✅ | Update bank account |
+| DELETE | `/bank-accounts/:id` | ✅ | Delete bank account |
+| POST | `/bank-accounts/:id/default` | ✅ | Set as default account |
 
 ### Contacts
 
-| Method | Path            | Auth | Description                           |
-|--------|-----------------|------|---------------------------------------|
-| GET    | `/contacts`     | ✅   | List contacts (search + type filter)  |
-| GET    | `/contacts/:id` | ✅   | Get a single contact                  |
-| POST   | `/contacts`     | ✅   | Create a contact                      |
-| PUT    | `/contacts/:id` | ✅   | Update a contact                      |
-| DELETE | `/contacts/:id` | ✅   | Delete a contact                      |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/contacts` | ✅ | List contacts (search + type filter) |
+| GET | `/contacts/:id` | ✅ | Get single contact |
+| POST | `/contacts` | ✅ | Create contact |
+| PUT | `/contacts/:id` | ✅ | Update contact |
+| DELETE | `/contacts/:id` | ✅ | Delete contact |
 
-> `GET /contacts` accepts: `search` (name or address), `type` (PROVIDER/FRIEND/CLIENT/FAMILY/OTHER), `limit`, `offset`.
+> `GET /contacts` query params: `search` (name or address) · `type` (PROVIDER/FRIEND/CLIENT/FAMILY/OTHER) · `limit` · `offset`
 
-### Webhooks (verified internally, no JWT required)
+### Exchange Rates
 
-| Method | Path                          | Verified By  |
-|--------|-------------------------------|--------------|
-| POST   | `/webhooks/veriff`            | HMAC-SHA256  |
-| POST   | `/webhooks/sumsub`            | HMAC-SHA256  |
-| POST   | `/webhooks/n8n/credit-score`  | Bearer token |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/rates/:pair` | — | Get rate for pair (e.g. `USDC-ECOP`) |
+| GET | `/rates` | — | List all cached rates |
+| POST | `/admin/rates` | ✅ Admin | Set rate manually |
+| DELETE | `/admin/rates/:pair` | ✅ Admin | Remove a rate |
+
+### OTC Orders
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/otc` | ✅ | List my OTC orders |
+| POST | `/otc` | ✅ | Create OTC order |
+| DELETE | `/otc/:id` | ✅ | Cancel OTC order |
+| GET | `/admin/otc` | ✅ Admin | List all OTC orders |
+| PUT | `/admin/otc/:id` | ✅ Admin | Update OTC order status |
+
+### Documents
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/documents` | ✅ | List my IPFS documents |
+| POST | `/documents` | ✅ | Upload document to Pinata IPFS |
+| GET | `/documents/:id` | ✅ | Get document metadata |
+| DELETE | `/documents/:id` | ✅ | Remove document reference |
+
+### Reputation
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/reputation` | ✅ | Get cached NFT tier from DB |
+| POST | `/reputation/sync` | ✅ | Re-read NFT balances from chain → update cache |
+
+### Funding (Business Tier 3)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/funding` | ✅ | List my funding requests |
+| POST | `/funding` | ✅ | Create funding request |
+| GET | `/funding/:id` | ✅ | Get funding request details |
+| GET | `/admin/funding` | ✅ Admin | List all funding requests |
+| PUT | `/admin/funding/:id` | ✅ Admin | Update funding request status |
+
+### Admin
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/admin/users` | ✅ Admin | List all users |
+| GET | `/admin/users/:id` | ✅ Admin | Get user details |
+| PUT | `/admin/users/:id` | ✅ Admin | Update user |
+| GET | `/admin/verifications` | ✅ Admin | List all verifications |
+| PUT | `/admin/verifications/:id` | ✅ Admin | Approve/reject verification |
+| GET | `/admin/roles` | ✅ Admin | List admin roles |
+| POST | `/admin/roles` | ✅ SUPER_ADMIN | Grant admin role |
+| DELETE | `/admin/roles/:id` | ✅ SUPER_ADMIN | Revoke admin role |
+
+### Webhooks
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/webhooks/veriff` | HMAC-SHA256 | Veriff KYC result callback |
+| POST | `/webhooks/sumsub` | HMAC-SHA256-HEX | Sumsub KYB result callback |
+| POST | `/webhooks/n8n/credit-score` | Bearer token | AI credit score result |
 
 ### System
 
-| Method | Path      | Description  |
-|--------|-----------|--------------|
-| GET    | `/health` | Health check |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
 
 ---
 
-## Credit Score Submission
+## Database Schema
+
+### Models
+
+| Model | Description |
+|---|---|
+| `User` | Core user record — wallet address, auth method, onboarding step, account type |
+| `IndividualProfile` | Personal details — name, email, DOB, nationality |
+| `BusinessProfile` | Company details — name, tax ID, legal rep, company size |
+| `Verification` | KYC / KYB / Humanity verification records (Veriff · Sumsub) |
+| `CreditScoreRequest` | Credit score submissions + n8n results + IPFS CIDs |
+| `ReputationCache` | Cached NFT tier (synced from blockchain via viem) |
+| `BankAccount` | AES-256 encrypted bank account records |
+| `Contact` | Wallet address book entries |
+| `Document` | IPFS document references (via Pinata) |
+| `OtcOrder` | OTC trade orders with status state machine |
+| `FundingRequest` | Vault funding requests (Business Tier 3 only) |
+| `ExchangeRate` | Cached exchange rates (USD/COP, USDC/ECOP, etc.) |
+| `NotificationLog` | Email + Telegram notification audit log |
+| `AdminRole` | Admin role assignments (VIEWER · VERIFIER · SUPER_ADMIN) |
+
+### Key enums
+
+| Enum | Values |
+|---|---|
+| `OnboardingStep` | NOT_STARTED · TYPE_SELECTED · PROFILE_COMPLETE · VERIFICATION_PENDING · COMPLETE |
+| `AccountType` | INDIVIDUAL · BUSINESS |
+| `AuthMethod` | WALLET · EMAIL · PASSKEY · GOOGLE |
+| `VerificationStatus` | PENDING · APPROVED · REJECTED · EXPIRED |
+| `CreditScoreStatus` | PENDING · PROCESSING · COMPLETE · FAILED |
+| `AdminRoleType` | VIEWER · VERIFIER · SUPER_ADMIN |
+
+---
+
+## Webhook Configuration
+
+### Veriff
+
+```
+URL:       https://your-api.com/webhooks/veriff
+Algorithm: HMAC_SHA256
+Header:    x-hmac-signature
+```
+
+### Sumsub
+
+```
+URL:       https://your-api.com/webhooks/sumsub
+Algorithm: HMAC_SHA256_HEX
+Header:    x-payload-digest
+```
+
+### n8n (credit score callback)
+
+```
+The backend fires N8N_WEBHOOK_URL with:
+{
+  requestId, userId, walletAddress,
+  incomeStatementCid, balanceSheetCid, cashFlowCid,
+  annualRevenue, netProfit, totalAssets, totalLiabilities,
+  employeeCount, yearsOperating, existingDebt, monthlyExpenses,
+  callbackUrl: APP_URL/webhooks/n8n/credit-score
+}
+
+n8n sends result back with:
+  Authorization: Bearer N8N_WEBHOOK_SECRET
+{
+  requestId, approved, score, rating,
+  maxCreditLimit, analysisNotes, rejectionReason
+}
+```
+
+If `approved && score >= 70`, the backend mints the Tier 3 (`Ecreditscoring`) NFT via the smart contract `safeMintWithIdentifier`.
+
+---
+
+## Credit Score Flow
 
 ```
 POST /verification/credit-score/submit
@@ -483,99 +574,80 @@ Fields (optional):
   additionalContext  — max 2000 chars
 ```
 
-The files are uploaded to Pinata IPFS, then n8n is triggered asynchronously. The result arrives via webhook at `/webhooks/n8n/credit-score`.
+Files are uploaded to **Pinata IPFS**. n8n processes the analysis asynchronously. The frontend polls `GET /verification/credit-score/status` every 30 seconds until status is `COMPLETE` or `FAILED`.
 
 ---
 
-## Webhook Configuration
+## Admin Bootstrap
 
-### Veriff
-```
-URL:       https://your-api.com/webhooks/veriff
-Algorithm: HMAC_SHA256
-Header:    x-hmac-signature
-```
+Wallets listed in `ADMIN_WALLET_ADDRESSES` are automatically seeded as `SUPER_ADMIN` on their **first sign-in**:
 
-### Sumsub
-```
-URL:       https://your-api.com/webhooks/sumsub
-Algorithm: HMAC_SHA256_HEX
-Header:    x-payload-digest
+```env
+ADMIN_WALLET_ADDRESSES=0xABC...,0xDEF...
 ```
 
-### n8n (credit score callback)
-```
-The backend fires N8N_WEBHOOK_URL with:
-  { requestId, userId, walletAddress,
-    incomeStatementCid, balanceSheetCid, cashFlowCid,
-    annualRevenue, netProfit, ...,
-    callbackUrl: APP_URL/webhooks/n8n/credit-score }
-
-n8n sends result back with:
-  Authorization: Bearer N8N_WEBHOOK_SECRET
-  { requestId, approved, score, rating,
-    maxCreditLimit, analysisNotes, rejectionReason }
-```
+Admin roles: `VIEWER` (read-only) · `VERIFIER` (can approve verifications) · `SUPER_ADMIN` (full access + role management).
 
 ---
 
 ## Docker Deployment
 
-### Local infrastructure only
+### Local — infrastructure only (recommended for development)
 
 ```bash
+# Start PostgreSQL + Redis
 docker-compose up -d postgres redis
+
+# Run migrations
+npm run db:migrate
+
+# Start API with hot-reload
 npm run dev
 ```
 
 ### Full Docker stack
 
 ```bash
+# Build and start everything
 docker-compose up -d --build
+
+# Run migrations
 docker-compose exec app npm run db:migrate:prod
+
+# Follow logs
 docker-compose logs -f app
 ```
 
----
+### Docker Compose services
 
-## Database Schema
-
-| Model                | Description                                      |
-|----------------------|--------------------------------------------------|
-| `User`               | Core user record (wallet, auth, onboarding step) |
-| `IndividualProfile`  | Personal details for individual accounts         |
-| `BusinessProfile`    | Company details + legal rep info                 |
-| `ReputationCache`    | Cached NFT balances and tier permissions         |
-| `Verification`       | KYC / KYB / Humanity verification records        |
-| `CreditScoreRequest` | Credit score submissions + n8n results           |
-| `BankAccount`        | Encrypted bank account records per user          |
-| `Contact`            | Address book (wallet addresses)                  |
-| `Document`           | IPFS document references                         |
-| `OtcOrder`           | OTC trade orders                                 |
-| `FundingRequest`     | Vault funding requests (Business only)           |
-| `NotificationLog`    | Email/Telegram notification audit log            |
-| `ExchangeRate`       | Cached exchange rates                            |
-| `AdminRole`          | Admin assignments (VIEWER, VERIFIER, SUPER_ADMIN)|
+| Service | Port | Description |
+|---|---|---|
+| `postgres` | 5432 | PostgreSQL 16 |
+| `redis` | 6379 | Redis 7 |
+| `app` | 3001 | Fastify API |
 
 ---
 
-## Supported Chains
+## Deployment Checklist
 
-| Chain            | Chain ID |
-|------------------|----------|
-| Base Mainnet     | 8453     |
-| Base Sepolia     | 84532    |
-| Unichain Mainnet | 130      |
-| Unichain Sepolia | 1301     |
-| Ethereum Sepolia | 11155111 |
+### Pre-deployment
+- [ ] All environment variables set (see [DEPLOY.md](./DEPLOY.md))
+- [ ] `DATABASE_URL` points to production PostgreSQL
+- [ ] `ENCRYPTION_KEY` is a secure 64-char hex string
+- [ ] `JWT_SECRET` is at least 32 chars
+- [ ] Veriff webhook registered at `APP_URL/webhooks/veriff`
+- [ ] Sumsub webhook registered at `APP_URL/webhooks/sumsub`
+- [ ] n8n workflow points `callbackUrl` back to `APP_URL/webhooks/n8n/credit-score`
 
----
+### Deployment
+- [ ] `npm run build` — TypeScript compile passes
+- [ ] `npm run db:migrate:prod` — migrations applied
+- [ ] `npm run start` — server starts, `/health` returns 200
 
-## Admin Bootstrap
+### Post-deployment
+- [ ] Swagger UI disabled in production (`NODE_ENV=production`)
+- [ ] Admin wallets bootstrapped via `ADMIN_WALLET_ADDRESSES`
+- [ ] Test SIWE auth flow end-to-end
+- [ ] Test at least one webhook delivery (Veriff or Sumsub)
 
-Wallets in `ADMIN_WALLET_ADDRESSES` are seeded as `SUPER_ADMIN` on first login:
-
-```env
-ADMIN_WALLET_ADDRESSES="0xABC...,0xDEF..."
-```
-# convexo_backend
+See [DEPLOY.md](./DEPLOY.md) for full production setup guide.

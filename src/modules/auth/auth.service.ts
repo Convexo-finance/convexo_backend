@@ -140,3 +140,53 @@ export async function blacklistToken(userId: string): Promise<void> {
     '1',
   )
 }
+
+// ─── Refresh Token ────────────────────────────────────────────────────────────
+
+export function verifyRefreshToken(
+  app: FastifyInstance,
+  refreshToken: string,
+): JwtPayload & { tokenType: string; chainId?: number } {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload = (app.jwt as any).verify(refreshToken) as JwtPayload & { tokenType?: string; chainId?: number }
+
+    // Ensure it's actually a refresh token, not an access token
+    if (payload.tokenType !== 'refresh') {
+      throw new UnauthorizedError('Invalid token type — expected refresh token')
+    }
+
+    return payload as JwtPayload & { tokenType: string; chainId?: number }
+  } catch (err) {
+    if (err instanceof UnauthorizedError) throw err
+    throw new UnauthorizedError('Invalid or expired refresh token')
+  }
+}
+
+// ─── Find user by ID (for refresh) ───────────────────────────────────────────
+
+export async function findUserById(userId: string) {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    include: { adminRole: true },
+  })
+  if (!user) throw new UnauthorizedError('User not found')
+  return user
+}
+
+// ─── Refresh Rate Limiting ────────────────────────────────────────────────────
+
+export async function checkRefreshRateLimit(userId: string): Promise<void> {
+  const key = `rate:refresh:${userId}`
+  const current = await redis.incr(key)
+
+  // Set TTL on first increment (60 seconds window)
+  if (current === 1) {
+    await redis.expire(key, 60)
+  }
+
+  // Max 5 refresh calls per minute per user
+  if (current > 5) {
+    throw new BadRequestError('Too many refresh attempts. Please wait a moment.')
+  }
+}
