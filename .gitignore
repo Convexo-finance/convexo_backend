@@ -4,8 +4,8 @@ dist/
 *.env.local
 .DS_Store
 
-# Prisma
-prisma/migrations/*/migration.sql
+# Prisma — migration SQL must be committed for Railway deploy
+# prisma/migrations/*/migration.sql
 
 # Logs
 *.log
