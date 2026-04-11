@@ -23,7 +23,9 @@ import { otcRoutes } from './modules/otc/otc.routes'
 import { documentsRoutes } from './modules/documents/documents.routes'
 import { reputationRoutes } from './modules/reputation/reputation.routes'
 import { fundingRoutes } from './modules/funding/funding.routes'
+import { vaultRoutes } from './modules/vault/vault.routes'
 import { adminRoutes } from './modules/admin/admin.routes'
+import { poolRoutes } from './modules/pool/pool.routes'
 
 // Webhooks
 import { veriffWebhookRoutes } from './webhooks/veriff.webhook'
@@ -83,7 +85,9 @@ export async function buildApp() {
   await app.register(documentsRoutes)
   await app.register(reputationRoutes)
   await app.register(fundingRoutes)
+  await app.register(vaultRoutes)
   await app.register(adminRoutes)
+  await app.register(poolRoutes)
 
   // Webhooks (no auth middleware — verified by HMAC/Bearer internally)
   await app.register(veriffWebhookRoutes)

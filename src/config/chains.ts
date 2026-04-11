@@ -1,4 +1,4 @@
-import { base, baseSepolia, mainnet, sepolia } from 'viem/chains'
+import { arbitrum, arbitrumSepolia, base, baseSepolia, mainnet, sepolia } from 'viem/chains'
 import type { Chain } from 'viem'
 
 // Unichain Mainnet (130)
@@ -28,19 +28,29 @@ export const unichainSepolia: Chain = {
   testnet: true,
 }
 
-export type SupportedChainId = 130 | 8453 | 1301 | 84532 | 11155111 | 1
+export type SupportedChainId = 8453 | 130 | 42161 | 1 | 84532 | 11155111 | 1301 | 421614
 
 export const SUPPORTED_CHAINS: Record<SupportedChainId, Chain> = {
-  130: unichainMainnet,
-  8453: base,
-  1301: unichainSepolia,
-  84532: baseSepolia,
+  8453:    base,
+  130:     unichainMainnet,
+  42161:   arbitrum,
+  1:       mainnet,
+  84532:   baseSepolia,
   11155111: sepolia,
-  1: mainnet,
+  1301:    unichainSepolia,
+  421614:  arbitrumSepolia,
 }
 
-export const MAINNET_CHAIN_IDS: SupportedChainId[] = [130, 8453, 1]
-export const TESTNET_CHAIN_IDS: SupportedChainId[] = [1301, 84532, 11155111]
+export const MAINNET_CHAIN_IDS: SupportedChainId[] = [8453, 130, 42161, 1]
+export const TESTNET_CHAIN_IDS: SupportedChainId[] = [84532, 11155111, 1301, 421614]
+
+export const PRIMARY_MAINNET_CHAIN_ID = 8453  // Base Mainnet — ZKPassport + full protocol
+export const PRIMARY_TESTNET_CHAIN_ID = 84532 // Base Sepolia — ZKPassport + full protocol
+
+export function getPrimaryChainId(): SupportedChainId {
+  const mode = process.env.NETWORK_MODE ?? 'testnet'
+  return mode === 'mainnet' ? PRIMARY_MAINNET_CHAIN_ID : PRIMARY_TESTNET_CHAIN_ID
+}
 
 export function isSupportedChain(chainId: number): chainId is SupportedChainId {
   return chainId in SUPPORTED_CHAINS

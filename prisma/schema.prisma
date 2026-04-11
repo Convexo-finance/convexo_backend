@@ -468,6 +468,37 @@ model FundingRequest {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// VAULT (on-chain TokenizedBondVault, created by VaultFactory)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model Vault {
+  id              String   @id @default(cuid())
+
+  // On-chain identifiers
+  onchainVaultId  String   // uint256 from VaultFactory (stored as string)
+  vaultAddress    String   @unique // TokenizedBondVault contract address
+  chainId         Int      @default(84532)
+
+  // Vault parameters (mirrors contract constructor args)
+  name            String
+  symbol          String
+  principalAmount String   // USDC amount in smallest unit (6 dec)
+  interestRate    String   // basis points e.g. "850" = 8.5%
+  protocolFeeRate String   // basis points
+  maturityDate    DateTime
+  totalShareSupply String  // shares (6 dec)
+  minInvestment   String   // USDC minimum (6 dec)
+  borrowerAddress String   // address that can withdrawFunds()
+
+  // Link to funding request
+  fundingRequestId String? @unique
+  txHash          String?  // deployment transaction hash
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // NOTIFICATION LOG
 // ═══════════════════════════════════════════════════════════════════════════════
 

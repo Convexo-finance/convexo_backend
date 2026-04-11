@@ -46,11 +46,16 @@ const envSchema = z.object({
   TELEGRAM_OPS_CHAT_ID: z.string().optional(),
   TELEGRAM_ADMIN_CHAT_ID: z.string().optional(),
 
+  // Network mode
+  NETWORK_MODE: z.enum(['mainnet', 'testnet']).default('testnet'),
+
   // Blockchain RPC
   BASE_MAINNET_RPC_URL: z.string().url().optional(),
   BASE_SEPOLIA_RPC_URL: z.string().url().optional(),
   UNICHAIN_MAINNET_RPC_URL: z.string().url().default('https://mainnet.unichain.org'),
   UNICHAIN_SEPOLIA_RPC_URL: z.string().url().default('https://sepolia.unichain.org'),
+  ARBITRUM_RPC_URL: z.string().url().default('https://arb1.arbitrum.io/rpc'),
+  ARBITRUM_SEPOLIA_RPC_URL: z.string().url().default('https://sepolia-rollup.arbitrum.io/rpc'),
 
   // Exchange Rates
   EXCHANGE_RATE_API_KEY: z.string().optional(),
@@ -61,6 +66,14 @@ const envSchema = z.object({
 
   // Admin Bootstrap
   ADMIN_WALLET_ADDRESSES: z.string().optional(),
+
+  // Pool Keeper
+  KEEPER_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  CONVEXO_HOOK_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  USDC_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  ECOP_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  MANUAL_PRICE_AGGREGATOR_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  POOL_KEEPER_CHAIN_ID: z.coerce.number().default(1301),  // Unichain Sepolia by default
 })
 
 function parseEnv() {

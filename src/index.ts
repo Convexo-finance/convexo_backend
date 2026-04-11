@@ -4,6 +4,7 @@ import { env } from './config/env'
 import { connectDatabase, disconnectDatabase } from './config/database'
 import { redis } from './config/redis'
 import { logger } from './shared/logger'
+import { startPoolKeeper, stopPoolKeeper } from './modules/pool/pool.keeper'
 
 async function start() {
   const app = await buildApp()
@@ -23,6 +24,9 @@ async function start() {
     if (env.NODE_ENV !== 'production') {
       logger.info(`📖 API docs at ${env.APP_URL}/docs`)
     }
+
+    // Start background keepers
+    startPoolKeeper()
   } catch (err) {
     logger.error(err, 'Failed to start server')
     process.exit(1)
@@ -34,6 +38,7 @@ async function start() {
 async function shutdown(signal: string) {
   logger.info(`${signal} received — shutting down gracefully`)
   try {
+    stopPoolKeeper()
     await disconnectDatabase()
     await redis.quit()
     logger.info('Shutdown complete')

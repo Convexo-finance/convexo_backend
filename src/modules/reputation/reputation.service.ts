@@ -1,7 +1,7 @@
 import { db } from '../../config/database'
 import { getPublicClient } from '../../shared/viem'
 import { NFT_CONTRACTS, ERC721_BALANCE_ABI } from '../../config/contracts'
-import { isSupportedChain, type SupportedChainId } from '../../config/chains'
+import { isSupportedChain, getPrimaryChainId, type SupportedChainId } from '../../config/chains'
 import { BadRequestError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import type { Address } from 'viem'
@@ -61,7 +61,7 @@ function computePermissions(tier: number, accountType: string | null) {
 
 // ─── Main sync function ───────────────────────────────────────────────────────
 
-export async function syncReputation(userId: string, chainId: number = 8453) {
+export async function syncReputation(userId: string, chainId: number = getPrimaryChainId()) {
   if (!isSupportedChain(chainId)) {
     throw new BadRequestError(`Unsupported chainId: ${chainId}`)
   }
