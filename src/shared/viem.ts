@@ -6,6 +6,7 @@ import { SUPPORTED_CHAINS, type SupportedChainId } from '../config/chains'
 const rpcOverrides: Partial<Record<SupportedChainId, string>> = {
   8453:    env.BASE_MAINNET_RPC_URL,
   84532:   env.BASE_SEPOLIA_RPC_URL,
+  11155111:env.ETHEREUM_SEPOLIA_RPC_URL,
   130:     env.UNICHAIN_MAINNET_RPC_URL,
   1301:    env.UNICHAIN_SEPOLIA_RPC_URL,
   42161:   env.ARBITRUM_RPC_URL,

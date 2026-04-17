@@ -52,6 +52,7 @@ const envSchema = z.object({
   // Blockchain RPC
   BASE_MAINNET_RPC_URL: z.string().url().optional(),
   BASE_SEPOLIA_RPC_URL: z.string().url().optional(),
+  ETHEREUM_SEPOLIA_RPC_URL: z.string().url().optional(),
   UNICHAIN_MAINNET_RPC_URL: z.string().url().default('https://mainnet.unichain.org'),
   UNICHAIN_SEPOLIA_RPC_URL: z.string().url().default('https://sepolia.unichain.org'),
   ARBITRUM_RPC_URL: z.string().url().default('https://arb1.arbitrum.io/rpc'),

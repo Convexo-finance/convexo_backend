@@ -44,8 +44,8 @@ export const SUPPORTED_CHAINS: Record<SupportedChainId, Chain> = {
 export const MAINNET_CHAIN_IDS: SupportedChainId[] = [8453, 130, 42161, 1]
 export const TESTNET_CHAIN_IDS: SupportedChainId[] = [84532, 11155111, 1301, 421614]
 
-export const PRIMARY_MAINNET_CHAIN_ID = 8453  // Base Mainnet — ZKPassport + full protocol
-export const PRIMARY_TESTNET_CHAIN_ID = 84532 // Base Sepolia — ZKPassport + full protocol
+export const PRIMARY_MAINNET_CHAIN_ID = 8453     // Base Mainnet — ZKPassport + full protocol
+export const PRIMARY_TESTNET_CHAIN_ID = 11155111 // ETH Sepolia — ZKPassport verifier + pool live
 
 export function getPrimaryChainId(): SupportedChainId {
   const mode = process.env.NETWORK_MODE ?? 'testnet'

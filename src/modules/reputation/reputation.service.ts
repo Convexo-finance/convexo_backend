@@ -1,6 +1,6 @@
 import { db } from '../../config/database'
 import { getPublicClient } from '../../shared/viem'
-import { NFT_CONTRACTS, ERC721_BALANCE_ABI } from '../../config/contracts'
+import { NFT_CONTRACTS, ERC721_BALANCE_ABI, getPassportAddress } from '../../config/contracts'
 import { isSupportedChain, getPrimaryChainId, type SupportedChainId } from '../../config/chains'
 import { BadRequestError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
@@ -76,10 +76,10 @@ export async function syncReputation(userId: string, chainId: number = getPrimar
   const client  = getPublicClient(chainId as SupportedChainId)
 
   const [passport, lpIndividuals, lpBusiness, ecredit] = await Promise.all([
-    readBalance(client, NFT_CONTRACTS.CONVEXO_PASSPORT as Address, address),
-    readBalance(client, NFT_CONTRACTS.LP_INDIVIDUALS   as Address, address),
-    readBalance(client, NFT_CONTRACTS.LP_BUSINESS      as Address, address),
-    readBalance(client, NFT_CONTRACTS.ECREDITSCORING   as Address, address),
+    readBalance(client, getPassportAddress(chainId) as Address, address),
+    readBalance(client, NFT_CONTRACTS.LP_INDIVIDUALS  as Address, address),
+    readBalance(client, NFT_CONTRACTS.LP_BUSINESS     as Address, address),
+    readBalance(client, NFT_CONTRACTS.ECREDITSCORING  as Address, address),
   ])
 
   const { tier, tierName } = computeTier(
