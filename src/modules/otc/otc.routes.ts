@@ -30,9 +30,16 @@ export async function otcRoutes(app: FastifyInstance) {
     handler: listAll,
   })
 
+  // PUT kept for backward compat; PATCH is the canonical endpoint
   app.put('/admin/otc/orders/:id/status', {
     preHandler: [requireAuth, requireAdmin('VERIFIER')],
-    schema: { tags: ['Admin — OTC'], summary: 'Update OTC order status' },
+    schema: { tags: ['Admin — OTC'], summary: 'Update OTC order status (PUT)' },
+    handler: updateStatus,
+  })
+
+  app.patch('/otc/orders/:id/status', {
+    preHandler: [requireAuth, requireAdmin('VERIFIER')],
+    schema: { tags: ['Admin — OTC'], summary: 'Update OTC order status (PATCH)' },
     handler: updateStatus,
   })
 }

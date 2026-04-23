@@ -120,6 +120,7 @@ enum OtcOrderType {
 
 enum OtcOrderStatus {
   PENDING
+  CONFIRMED
   IN_PROGRESS
   COMPLETED
   CANCELLED
@@ -359,7 +360,17 @@ model BankAccount {
   accountType            BankAccountType
   currency               String            @default("COP")
   isDefault              Boolean           @default(false)
-  holderName             String?
+
+  holderName             String
+  bankCountry            String
+  documentType           String
+  documentNumber         String
+  bankAddress            String
+  bankCity               String
+  bankState              String?
+  swiftCode              String?
+  routingNumber          String?
+  iban                   String?
 
   status                 BankAccountStatus @default(PENDING)
   verifiedAt             DateTime?
@@ -419,17 +430,36 @@ model Document {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 model OtcOrder {
-  id           String         @id @default(cuid())
-  userId       String
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  orderType    OtcOrderType
-  tokenIn      String
-  tokenOut     String
-  amountIn     String
+  orderId       String?        @unique
+  orderType     OtcOrderType
+
+  // Fiat-OTC fields (new format)
+  digitalAsset  String?
+  fiatCurrency  String?
+  assetAmount   Decimal?       @db.Decimal(18, 6)
+  estimatedFiat Decimal?       @db.Decimal(18, 2)
+  rate          Decimal?       @db.Decimal(18, 6)
+  walletAddress String?
+  frontendTimestamp DateTime?
+
+  // Sell order bank info
+  bankName        String?
+  bankAccount     String?
+  bankAccountType String?
+  holderName      String?
+  accountLabel    String?
+
+  // Legacy swap fields (optional for backward compat)
+  tokenIn      String?
+  tokenOut     String?
+  amountIn     String?
   amountOut    String?
   priceUSD     String?
-  network      String
+  network      String?
 
   status       OtcOrderStatus @default(PENDING)
   telegramSent Boolean        @default(false)

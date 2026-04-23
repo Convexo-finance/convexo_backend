@@ -5,7 +5,7 @@ import { sendEmail, sendTelegram } from '../notifications/notifications.service'
 import { logger } from '../../shared/logger'
 import type { CreateOtcOrderInput, UpdateOtcOrderStatusInput, ListOtcOrdersInput } from './otc.schema'
 
-// ─── Helper — try to calculate amountOut from admin-set rates ─────────────────
+// ─── Helper — try to calculate amountOut from admin-set rates (legacy) ────────
 
 async function resolveAmountOut(
   tokenIn: string,
@@ -19,10 +19,9 @@ async function resolveAmountOut(
 
     const amountOut = (parseFloat(amountIn) * rate.rate).toFixed(6)
 
-    // Resolve USD price if rate is USD-based
-    const usdPair   = `${tokenIn.toUpperCase()}-USD`
-    const usdRate   = await db.exchangeRate.findUnique({ where: { pair: usdPair } })
-    const priceUSD  = usdRate ? (parseFloat(amountIn) * usdRate.rate).toFixed(2) : null
+    const usdPair  = `${tokenIn.toUpperCase()}-USD`
+    const usdRate  = await db.exchangeRate.findUnique({ where: { pair: usdPair } })
+    const priceUSD = usdRate ? (parseFloat(amountIn) * usdRate.rate).toFixed(2) : null
 
     return { amountOut, priceUSD }
   } catch {
@@ -37,33 +36,53 @@ export async function createOtcOrder(
   walletAddress: string,
   input: CreateOtcOrderInput,
 ) {
-  const { amountOut, priceUSD } = await resolveAmountOut(
-    input.tokenIn,
-    input.tokenOut,
-    input.amountIn,
-  )
+  // Legacy swap format: resolve amountOut from rates
+  let amountOut: string | null = null
+  let priceUSD: string | null = null
+  if (input.tokenIn && input.tokenOut && input.amountIn) {
+    const resolved = await resolveAmountOut(input.tokenIn, input.tokenOut, input.amountIn)
+    amountOut = resolved.amountOut
+    priceUSD  = resolved.priceUSD
+  }
 
   const order = await db.otcOrder.create({
     data: {
       userId,
-      orderType: input.orderType,
-      tokenIn:   input.tokenIn.toUpperCase(),
-      tokenOut:  input.tokenOut.toUpperCase(),
-      amountIn:  input.amountIn,
-      amountOut: amountOut ?? undefined,
-      priceUSD:  priceUSD  ?? undefined,
-      network:   input.network,
-      notes:     input.notes,
-      status:    'PENDING',
+      orderId:           input.orderId,
+      orderType:         input.orderType,
+      // Fiat-OTC fields
+      digitalAsset:      input.digitalAsset,
+      fiatCurrency:      input.fiatCurrency,
+      assetAmount:       input.assetAmount,
+      estimatedFiat:     input.estimatedFiat,
+      rate:              input.rate,
+      walletAddress:     input.walletAddress ?? walletAddress,
+      frontendTimestamp: input.timestamp ? new Date(input.timestamp) : undefined,
+      // Sell order bank info
+      bankName:          input.bankName,
+      bankAccount:       input.bankAccount,
+      bankAccountType:   input.accountType,
+      holderName:        input.holderName,
+      accountLabel:      input.accountLabel,
+      // Legacy swap fields
+      tokenIn:           input.tokenIn?.toUpperCase(),
+      tokenOut:          input.tokenOut?.toUpperCase(),
+      amountIn:          input.amountIn,
+      amountOut:         amountOut ?? undefined,
+      priceUSD:          priceUSD  ?? undefined,
+      network:           input.network,
+      notes:             input.notes,
+      status:            'PENDING',
     },
     include: { user: { include: { individualProfile: true, businessProfile: true } } },
   })
 
   // Notify admin via Telegram (non-blocking)
   if (env.TELEGRAM_ADMIN_CHAT_ID) {
-    const rateInfo = amountOut
-      ? `Rate: 1 ${input.tokenIn} = ${(parseFloat(amountOut) / parseFloat(input.amountIn)).toFixed(6)} ${input.tokenOut}`
-      : 'Rate: not configured for this pair'
+    const isFiatOtc = !!input.digitalAsset
+    const summary = isFiatOtc
+      ? `${input.orderType} ${input.assetAmount} ${input.digitalAsset} ↔ ${input.estimatedFiat} ${input.fiatCurrency}`
+      : `${input.amountIn} ${input.tokenIn?.toUpperCase()} → ${amountOut ?? '?'} ${input.tokenOut?.toUpperCase()}`
 
     sendTelegram({
       userId,
@@ -72,12 +91,9 @@ export async function createOtcOrder(
         `🔄 <b>New OTC Order</b>`,
         ``,
         `Type:    <b>${input.orderType}</b>`,
-        `From:    <code>${input.amountIn} ${input.tokenIn.toUpperCase()}</code>`,
-        `To:      <code>${amountOut ?? '?'} ${input.tokenOut.toUpperCase()}</code>`,
-        `Network: <code>${input.network}</code>`,
-        `${rateInfo}`,
-        `Wallet:  <code>${walletAddress}</code>`,
-        `OrderID: <code>${order.id}</code>`,
+        `Trade:   <code>${summary}</code>`,
+        `Wallet:  <code>${input.walletAddress ?? walletAddress}</code>`,
+        `OrderID: <code>${input.orderId ?? order.id}</code>`,
         ``,
         `Review: ${env.APP_URL}/admin/otc`,
       ].join('\n'),
@@ -90,21 +106,26 @@ export async function createOtcOrder(
     order.user.businessProfile?.email
 
   if (email) {
-    const direction = input.orderType === 'BUY'
-      ? `Buy <b>${amountOut ?? '?'} ${input.tokenOut}</b> with <b>${input.amountIn} ${input.tokenIn}</b>`
-      : `Sell <b>${input.amountIn} ${input.tokenIn}</b> for <b>${amountOut ?? '?'} ${input.tokenOut}</b>`
+    const isFiatOtc = !!input.digitalAsset
+    const direction = isFiatOtc
+      ? (input.orderType === 'BUY'
+          ? `Buy <b>${input.assetAmount} ${input.digitalAsset}</b> for <b>${input.estimatedFiat} ${input.fiatCurrency}</b>`
+          : `Sell <b>${input.assetAmount} ${input.digitalAsset}</b> for <b>${input.estimatedFiat} ${input.fiatCurrency}</b>`)
+      : (input.orderType === 'BUY'
+          ? `Buy <b>${amountOut ?? '?'} ${input.tokenOut}</b> with <b>${input.amountIn} ${input.tokenIn}</b>`
+          : `Sell <b>${input.amountIn} ${input.tokenIn}</b> for <b>${amountOut ?? '?'} ${input.tokenOut}</b>`)
 
     sendEmail({
       userId,
       to: email,
-      subject: `OTC Order Received — ${input.orderType} ${input.tokenIn}/${input.tokenOut}`,
+      subject: `OTC Order Received — ${input.orderType} ${input.digitalAsset ?? input.tokenIn}`,
       html: `
         <h2>Your OTC order has been received</h2>
         <p>${direction}</p>
-        <p>Network: ${input.network}</p>
+        ${input.network ? `<p>Network: ${input.network}</p>` : ''}
         ${priceUSD ? `<p>Estimated value: <strong>$${priceUSD} USD</strong></p>` : ''}
         <p>Our team will contact you shortly to complete the transaction.</p>
-        <p>Order ID: <code>${order.id}</code></p>
+        <p>Order ID: <code>${input.orderId ?? order.id}</code></p>
       `,
     }).catch((err) => logger.error({ err }, 'OTC email notify failed'))
   }
@@ -143,7 +164,9 @@ export async function listMyOtcOrders(userId: string, query: ListOtcOrdersInput)
 // ─── User — get single order ──────────────────────────────────────────────────
 
 export async function getMyOtcOrder(userId: string, id: string) {
-  const order = await db.otcOrder.findUnique({ where: { id } })
+  const order = await db.otcOrder.findFirst({
+    where: { OR: [{ id }, { orderId: id }] },
+  })
   if (!order) throw new NotFoundError('OTC order')
   if (order.userId !== userId) throw new ForbiddenError()
   return order
@@ -183,41 +206,45 @@ export async function updateOtcOrderStatus(
   id: string,
   input: UpdateOtcOrderStatusInput,
 ) {
-  const order = await db.otcOrder.findUnique({
-    where: { id },
+  const order = await db.otcOrder.findFirst({
+    where: { OR: [{ id }, { orderId: id }] },
     include: { user: { include: { individualProfile: true, businessProfile: true } } },
   })
   if (!order) throw new NotFoundError('OTC order')
 
   const updated = await db.otcOrder.update({
-    where: { id },
+    where: { id: order.id },
     data: {
       status: input.status,
       notes:  input.notes !== undefined ? input.notes : order.notes,
     },
   })
 
-  // Notify user of status change
   const email =
     order.user.individualProfile?.email ??
     order.user.businessProfile?.email
 
   if (email) {
     const statusLabels: Record<string, string> = {
+      CONFIRMED:   '✅ Confirmed',
       IN_PROGRESS: '⏳ In Progress',
       COMPLETED:   '✅ Completed',
       CANCELLED:   '❌ Cancelled',
     }
+    const tradeLabel = order.digitalAsset
+      ? `${order.orderType} ${order.assetAmount} ${order.digitalAsset}`
+      : `${order.orderType} ${order.amountIn} ${order.tokenIn} → ${order.amountOut ?? '?'} ${order.tokenOut}`
+
     sendEmail({
       userId: order.userId,
       to:     email,
       subject: `OTC Order ${statusLabels[input.status] ?? input.status}`,
       html: `
         <h2>Your OTC order status has been updated</h2>
-        <p>Order: <strong>${order.orderType} ${order.amountIn} ${order.tokenIn} → ${order.amountOut ?? '?'} ${order.tokenOut}</strong></p>
+        <p>Order: <strong>${tradeLabel}</strong></p>
         <p>New status: <strong>${statusLabels[input.status] ?? input.status}</strong></p>
         ${input.notes ? `<p>Note: ${input.notes}</p>` : ''}
-        <p>Order ID: <code>${order.id}</code></p>
+        <p>Order ID: <code>${order.orderId ?? order.id}</code></p>
       `,
     }).catch((err) => logger.error({ err }, 'OTC status email failed'))
   }
