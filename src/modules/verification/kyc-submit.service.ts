@@ -1,6 +1,4 @@
-import { Readable } from 'stream'
 import { randomUUID } from 'crypto'
-import PinataClient from '@pinata/sdk'
 import { env } from '../../config/env'
 import { db } from '../../config/database'
 import { logger } from '../../shared/logger'
@@ -8,29 +6,10 @@ import { BadRequestError } from '../../shared/errors'
 import { sendTelegram } from '../notifications/notifications.service'
 
 export interface KycFiles {
-  governmentId:   { buffer: Buffer; filename: string }
-  proofOfAddress: { buffer: Buffer; filename: string }
-  rutDocument?:   { buffer: Buffer; filename: string }
+  governmentId:   { buffer: Buffer; filename: string; mimetype: string }
+  proofOfAddress: { buffer: Buffer; filename: string; mimetype: string }
+  rutDocument?:   { buffer: Buffer; filename: string; mimetype: string }
 }
-
-// ─── Pinata upload ────────────────────────────────────────────────────────────
-
-function getPinata(): PinataClient {
-  if (!env.PINATA_JWT) throw new BadRequestError('Pinata is not configured — cannot upload documents.')
-  return new PinataClient({ pinataJWTKey: env.PINATA_JWT })
-}
-
-async function uploadToPinata(buffer: Buffer, filename: string): Promise<string> {
-  const pinata = getPinata()
-  const stream = Readable.from(buffer) as NodeJS.ReadableStream
-  const result = await pinata.pinFileToIPFS(stream, {
-    pinataMetadata: { name: filename },
-    pinataOptions:  { cidVersion: 1 },
-  })
-  return result.IpfsHash
-}
-
-// ─── Submit KYC ───────────────────────────────────────────────────────────────
 
 export async function submitKyc(
   userId: string,
@@ -42,27 +21,33 @@ export async function submitKyc(
   })
   if (existing) throw new BadRequestError('A KYC submission is already under review.')
 
-  const uploadPromises: Promise<string>[] = [
-    uploadToPinata(files.governmentId.buffer,   files.governmentId.filename),
-    uploadToPinata(files.proofOfAddress.buffer, files.proofOfAddress.filename),
-  ]
-  if (files.rutDocument) {
-    uploadPromises.push(uploadToPinata(files.rutDocument.buffer, files.rutDocument.filename))
-  }
-
-  const cids = await Promise.all(uploadPromises)
-  const [governmentIdCid, proofOfAddressCid] = cids
-  const rutDocumentCid = files.rutDocument ? cids[2] : undefined
-
   const submission = await db.kycSubmission.create({
-    data: {
-      userId,
-      governmentIdCid,
-      proofOfAddressCid,
-      rutDocumentCid,
-      status: 'PENDING',
-    },
+    data: { userId, status: 'PENDING' },
   })
+
+  const filesToSave = [
+    { fieldName: 'governmentId',   file: files.governmentId },
+    { fieldName: 'proofOfAddress', file: files.proofOfAddress },
+    ...(files.rutDocument
+      ? [{ fieldName: 'rutDocument', file: files.rutDocument }]
+      : []),
+  ]
+
+  await Promise.all(
+    filesToSave.map(({ fieldName, file }) =>
+      db.submissionDocument.create({
+        data: {
+          userId,
+          kycSubmissionId: submission.id,
+          fieldName,
+          filename:  file.filename,
+          mimeType:  file.mimetype,
+          sizeBytes: file.buffer.length,
+          content:   file.buffer,
+        },
+      })
+    )
+  )
 
   await db.verification.create({
     data: {
@@ -88,6 +73,7 @@ export async function submitKyc(
         ``,
         `Wallet: <code>${walletAddress}</code>`,
         `ID:     <code>${submission.id}</code>`,
+        `Docs:   ${filesToSave.length} file(s) stored securely`,
         ``,
         `Review: ${env.APP_URL}/admin/kyc`,
       ].join('\n'),
@@ -95,10 +81,8 @@ export async function submitKyc(
   }
 
   return {
-    submissionId: submission.id,
-    status: 'PENDING',
-    governmentIdCid,
-    proofOfAddressCid,
-    rutDocumentCid,
+    submissionId:  submission.id,
+    status:        'PENDING',
+    documentCount: filesToSave.length,
   }
 }

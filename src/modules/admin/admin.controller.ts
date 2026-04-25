@@ -11,6 +11,13 @@ import {
   listAllCreditScoreRequests,
   adminOverrideCreditScore,
   recordCreditScoreNft,
+  listKybSubmissions,
+  getKybSubmission,
+  reviewKybSubmission,
+  listKycSubmissions,
+  getKycSubmission,
+  reviewKycSubmission,
+  getSubmissionDocument,
 } from './admin.service'
 import {
   listUsersSchema,
@@ -18,6 +25,8 @@ import {
   overrideVerificationSchema,
   recordNftSchema,
   overrideCreditScoreSchema,
+  listSubmissionsSchema,
+  reviewSubmissionSchema,
 } from './admin.schema'
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -111,4 +120,64 @@ export async function recordCreditScoreNftHandler(
   const { nftTokenId } = recordNftSchema.parse(request.body)
   const updated = await recordCreditScoreNft(request.params.id, nftTokenId)
   return reply.send(updated)
+}
+
+// ─── KYB Submissions ──────────────────────────────────────────────────────────
+
+export async function listKybHandler(request: FastifyRequest, reply: FastifyReply) {
+  const query = listSubmissionsSchema.parse(request.query)
+  return reply.send(await listKybSubmissions(query))
+}
+
+export async function getKybHandler(
+  request: FastifyRequest<{ Params: { id: string } }>,
+  reply: FastifyReply,
+) {
+  return reply.send(await getKybSubmission(request.params.id))
+}
+
+export async function reviewKybHandler(
+  request: FastifyRequest<{ Params: { id: string } }>,
+  reply: FastifyReply,
+) {
+  const input   = reviewSubmissionSchema.parse(request.body)
+  const updated = await reviewKybSubmission(request.params.id, request.user.sub, input)
+  return reply.send(updated)
+}
+
+// ─── KYC Submissions ──────────────────────────────────────────────────────────
+
+export async function listKycHandler(request: FastifyRequest, reply: FastifyReply) {
+  const query = listSubmissionsSchema.parse(request.query)
+  return reply.send(await listKycSubmissions(query))
+}
+
+export async function getKycHandler(
+  request: FastifyRequest<{ Params: { id: string } }>,
+  reply: FastifyReply,
+) {
+  return reply.send(await getKycSubmission(request.params.id))
+}
+
+export async function reviewKycHandler(
+  request: FastifyRequest<{ Params: { id: string } }>,
+  reply: FastifyReply,
+) {
+  const input   = reviewSubmissionSchema.parse(request.body)
+  const updated = await reviewKycSubmission(request.params.id, request.user.sub, input)
+  return reply.send(updated)
+}
+
+// ─── Document download ────────────────────────────────────────────────────────
+
+export async function downloadDocumentHandler(
+  request: FastifyRequest<{ Params: { docId: string } }>,
+  reply: FastifyReply,
+) {
+  const doc = await getSubmissionDocument(request.params.docId)
+  return reply
+    .header('Content-Type', doc.mimeType)
+    .header('Content-Disposition', `attachment; filename="${doc.filename}"`)
+    .header('Content-Length', String(doc.sizeBytes))
+    .send(doc.content)
 }

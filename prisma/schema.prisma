@@ -329,13 +329,12 @@ model KybSubmission {
   repPhone            String
   shareholders        Json
 
-  incorporationCertificateCid String
-  taxDocumentCid              String
-  proofOfAddressCid           String
-  representativeIdCid         String
-  shareholdersCertificateCid  String?
+  documents  SubmissionDocument[]
 
-  status String @default("PENDING")
+  status     String   @default("PENDING")
+  reviewNote String?
+  reviewedAt DateTime?
+  reviewedBy String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -350,14 +349,38 @@ model KycSubmission {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  governmentIdCid   String
-  proofOfAddressCid String
-  rutDocumentCid    String?
+  documents  SubmissionDocument[]
 
-  status String @default("PENDING")
+  status     String   @default("PENDING")
+  reviewNote String?
+  reviewedAt DateTime?
+  reviewedBy String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUBMISSION DOCUMENT (binary file stored in DB)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model SubmissionDocument {
+  id     String @id @default(cuid())
+  userId String
+
+  kybSubmissionId String?
+  kybSubmission   KybSubmission? @relation(fields: [kybSubmissionId], references: [id], onDelete: Cascade)
+
+  kycSubmissionId String?
+  kycSubmission   KycSubmission? @relation(fields: [kycSubmissionId], references: [id], onDelete: Cascade)
+
+  fieldName String
+  filename  String
+  mimeType  String
+  sizeBytes Int
+  content   Bytes
+
+  createdAt DateTime @default(now())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

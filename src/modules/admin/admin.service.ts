@@ -279,3 +279,162 @@ export async function recordCreditScoreNft(id: string, nftTokenId: string) {
     },
   })
 }
+
+// ─── KYB Submissions ──────────────────────────────────────────────────────────
+
+const submissionUserInclude = {
+  select: {
+    walletAddress: true,
+    businessProfile:   { select: { companyName: true, email: true } },
+    individualProfile: { select: { firstName: true, lastName: true, email: true } },
+  },
+}
+
+export async function listKybSubmissions(query: { status?: string; limit: number; offset: number }) {
+  const where: Record<string, unknown> = {}
+  if (query.status) where['status'] = query.status
+
+  const [items, total] = await Promise.all([
+    db.kybSubmission.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip:    query.offset,
+      take:    query.limit,
+      include: {
+        user:      submissionUserInclude,
+        documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+      },
+    }),
+    db.kybSubmission.count({ where }),
+  ])
+
+  return { items, total, limit: query.limit, offset: query.offset }
+}
+
+export async function getKybSubmission(id: string) {
+  const submission = await db.kybSubmission.findUnique({
+    where:   { id },
+    include: {
+      user:      submissionUserInclude,
+      documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+    },
+  })
+  if (!submission) throw new NotFoundError('KYB submission')
+  return submission
+}
+
+export async function reviewKybSubmission(
+  id: string,
+  adminId: string,
+  input: { status: 'APPROVED' | 'REJECTED'; reviewNote?: string },
+) {
+  const submission = await db.kybSubmission.findUnique({ where: { id } })
+  if (!submission) throw new NotFoundError('KYB submission')
+
+  const updated = await db.kybSubmission.update({
+    where: { id },
+    data: {
+      status:     input.status,
+      reviewNote: input.reviewNote,
+      reviewedAt: new Date(),
+      reviewedBy: adminId,
+    },
+  })
+
+  // Sync the linked Verification record
+  await db.verification.updateMany({
+    where: { userId: submission.userId, type: 'KYB_BUSINESS', provider: 'INTERNAL' },
+    data:  { status: input.status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+             rejectionReason: input.reviewNote,
+             processedAt: new Date(),
+             processedBy: adminId },
+  })
+
+  if (input.status === 'APPROVED') {
+    await db.user.update({
+      where: { id: submission.userId },
+      data:  { onboardingStep: 'LP_COMPLETE' },
+    })
+  }
+
+  return updated
+}
+
+// ─── KYC Submissions ──────────────────────────────────────────────────────────
+
+export async function listKycSubmissions(query: { status?: string; limit: number; offset: number }) {
+  const where: Record<string, unknown> = {}
+  if (query.status) where['status'] = query.status
+
+  const [items, total] = await Promise.all([
+    db.kycSubmission.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip:    query.offset,
+      take:    query.limit,
+      include: {
+        user:      submissionUserInclude,
+        documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+      },
+    }),
+    db.kycSubmission.count({ where }),
+  ])
+
+  return { items, total, limit: query.limit, offset: query.offset }
+}
+
+export async function getKycSubmission(id: string) {
+  const submission = await db.kycSubmission.findUnique({
+    where:   { id },
+    include: {
+      user:      submissionUserInclude,
+      documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+    },
+  })
+  if (!submission) throw new NotFoundError('KYC submission')
+  return submission
+}
+
+export async function reviewKycSubmission(
+  id: string,
+  adminId: string,
+  input: { status: 'APPROVED' | 'REJECTED'; reviewNote?: string },
+) {
+  const submission = await db.kycSubmission.findUnique({ where: { id } })
+  if (!submission) throw new NotFoundError('KYC submission')
+
+  const updated = await db.kycSubmission.update({
+    where: { id },
+    data: {
+      status:     input.status,
+      reviewNote: input.reviewNote,
+      reviewedAt: new Date(),
+      reviewedBy: adminId,
+    },
+  })
+
+  await db.verification.updateMany({
+    where: { userId: submission.userId, type: 'KYC_INDIVIDUAL', provider: 'INTERNAL' },
+    data:  { status: input.status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+             rejectionReason: input.reviewNote,
+             processedAt: new Date(),
+             processedBy: adminId },
+  })
+
+  if (input.status === 'APPROVED') {
+    await db.user.update({
+      where: { id: submission.userId },
+      data:  { onboardingStep: 'LP_COMPLETE' },
+    })
+  }
+
+  return updated
+}
+
+// ─── Submission document download ─────────────────────────────────────────────
+
+export async function getSubmissionDocument(docId: string) {
+  const doc = await db.submissionDocument.findUnique({ where: { id: docId } })
+  if (!doc) throw new NotFoundError('Document')
+  return doc
+}

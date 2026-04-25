@@ -36,8 +36,23 @@ export const overrideCreditScoreSchema = z.object({
   rejectionReason: z.string().max(500).optional(),
 })
 
+// ─── Submission list query ────────────────────────────────────────────────────
+export const listSubmissionsSchema = z.object({
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  limit:  z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+})
+
+// ─── Review (approve / reject) ────────────────────────────────────────────────
+export const reviewSubmissionSchema = z.object({
+  status:     z.enum(['APPROVED', 'REJECTED']),
+  reviewNote: z.string().max(1000).optional(),
+})
+
 export type ListUsersInput            = z.infer<typeof listUsersSchema>
 export type GrantAdminRoleInput       = z.infer<typeof grantAdminRoleSchema>
 export type OverrideVerificationInput = z.infer<typeof overrideVerificationSchema>
 export type RecordNftInput            = z.infer<typeof recordNftSchema>
 export type OverrideCreditScoreInput  = z.infer<typeof overrideCreditScoreSchema>
+export type ListSubmissionsInput      = z.infer<typeof listSubmissionsSchema>
+export type ReviewSubmissionInput     = z.infer<typeof reviewSubmissionSchema>
