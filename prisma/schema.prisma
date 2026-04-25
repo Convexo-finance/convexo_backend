@@ -176,6 +176,8 @@ model User {
   fundingRequests     FundingRequest[]
   notifications       NotificationLog[]
   adminRole           AdminRole?
+  kybSubmissions      KybSubmission[]
+  kycSubmissions      KycSubmission[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -299,6 +301,63 @@ model Verification {
 
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KYB SUBMISSION (manual — admin reviews)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model KybSubmission {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyName         String
+  country             String
+  companyType         String
+  incorporationNumber String
+  taxNumber           String
+  street              String
+  city                String
+  stateRegion         String?
+  officeCountry       String
+  repFirstName        String
+  repLastName         String
+  repDocType          String
+  repDocNumber        String
+  repEmail            String
+  repPhone            String
+  shareholders        Json
+
+  incorporationCertificateCid String
+  taxDocumentCid              String
+  proofOfAddressCid           String
+  representativeIdCid         String
+  shareholdersCertificateCid  String?
+
+  status String @default("PENDING")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KYC SUBMISSION (manual — admin reviews)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model KycSubmission {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  governmentIdCid   String
+  proofOfAddressCid String
+  rutDocumentCid    String?
+
+  status String @default("PENDING")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

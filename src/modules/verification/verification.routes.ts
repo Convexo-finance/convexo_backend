@@ -9,6 +9,8 @@ import {
   getKybStatusHandler,
   submitCreditScoreHandler,
   getCreditScoreStatusHandler,
+  submitKybHandler,
+  submitKycHandler,
 } from './verification.controller'
 
 export async function verificationRoutes(app: FastifyInstance) {
@@ -43,6 +45,20 @@ export async function verificationRoutes(app: FastifyInstance) {
     preHandler: [requireAuth, requireBusiness],
     schema: { tags: ['Verification'], summary: 'Get KYB verification status (businesses)' },
     handler: getKybStatusHandler,
+  })
+
+  // ─── KYB Submit — Business ───────────────────────────────────────────────────
+  app.post('/verification/kyb/submit', {
+    preHandler: [requireAuth, requireBusiness],
+    schema: { tags: ['Verification'], summary: 'Submit KYB documents for manual review (businesses)' },
+    handler: submitKybHandler,
+  })
+
+  // ─── KYC Submit — Individual ─────────────────────────────────────────────────
+  app.post('/verification/kyc/submit', {
+    preHandler: [requireAuth, requireIndividual],
+    schema: { tags: ['Verification'], summary: 'Submit KYC documents for manual review (individuals)' },
+    handler: submitKycHandler,
   })
 
   // ─── Credit Score — Business ─────────────────────────────────────────────────

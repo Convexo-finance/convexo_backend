@@ -10,10 +10,13 @@ import {
   getCreditScoreStatus,
   type CreditScoreDocuments,
 } from './credit-score.service'
+import { submitKyb, type KybFiles } from './kyb-submit.service'
+import { submitKyc, type KycFiles } from './kyc-submit.service'
 import {
   startKycSchema,
   startKybSchema,
   creditScoreSubmitSchema,
+  kybSubmitSchema,
 } from './verification.schema'
 
 // ─── GET /verification/status ─────────────────────────────────────────────────
@@ -134,4 +137,81 @@ export async function submitCreditScoreHandler(request: FastifyRequest, reply: F
 export async function getCreditScoreStatusHandler(request: FastifyRequest, reply: FastifyReply) {
   const result = await getCreditScoreStatus(request.user.sub)
   return reply.send(result)
+}
+
+// ─── POST /verification/kyb/submit (Business only) ───────────────────────────
+
+export async function submitKybHandler(request: FastifyRequest, reply: FastifyReply) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: request.user.sub } })
+
+  const parts = request.parts()
+  const fileBuffers: Record<string, { buffer: Buffer; filename: string; mimetype: string }> = {}
+  const fieldValues: Record<string, string> = {}
+
+  for await (const part of parts) {
+    if (part.type === 'file') {
+      const file = part as MultipartFile
+      const chunks: Buffer[] = []
+      for await (const chunk of file.file) chunks.push(chunk)
+      fileBuffers[file.fieldname] = {
+        buffer:   Buffer.concat(chunks),
+        filename: file.filename,
+        mimetype: file.mimetype,
+      }
+    } else {
+      fieldValues[part.fieldname] = part.value as string
+    }
+  }
+
+  if (!fileBuffers['incorporationCertificate']) throw new BadRequestError('incorporationCertificate is required')
+  if (!fileBuffers['taxDocument'])              throw new BadRequestError('taxDocument is required')
+  if (!fileBuffers['proofOfAddress'])           throw new BadRequestError('proofOfAddress is required')
+  if (!fileBuffers['representativeId'])         throw new BadRequestError('representativeId is required')
+
+  const formData = kybSubmitSchema.parse(fieldValues)
+
+  const files: KybFiles = {
+    incorporationCertificate: fileBuffers['incorporationCertificate'],
+    taxDocument:              fileBuffers['taxDocument'],
+    proofOfAddress:           fileBuffers['proofOfAddress'],
+    representativeId:         fileBuffers['representativeId'],
+    shareholdersCertificate:  fileBuffers['shareholdersCertificate'],
+  }
+
+  const result = await submitKyb(user.id, user.walletAddress, files, formData)
+  return reply.status(201).send(result)
+}
+
+// ─── POST /verification/kyc/submit (Individual only) ─────────────────────────
+
+export async function submitKycHandler(request: FastifyRequest, reply: FastifyReply) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: request.user.sub } })
+
+  const parts = request.parts()
+  const fileBuffers: Record<string, { buffer: Buffer; filename: string; mimetype: string }> = {}
+
+  for await (const part of parts) {
+    if (part.type === 'file') {
+      const file = part as MultipartFile
+      const chunks: Buffer[] = []
+      for await (const chunk of file.file) chunks.push(chunk)
+      fileBuffers[file.fieldname] = {
+        buffer:   Buffer.concat(chunks),
+        filename: file.filename,
+        mimetype: file.mimetype,
+      }
+    }
+  }
+
+  if (!fileBuffers['governmentId'])   throw new BadRequestError('governmentId is required')
+  if (!fileBuffers['proofOfAddress']) throw new BadRequestError('proofOfAddress is required')
+
+  const files: KycFiles = {
+    governmentId:   fileBuffers['governmentId'],
+    proofOfAddress: fileBuffers['proofOfAddress'],
+    rutDocument:    fileBuffers['rutDocument'],
+  }
+
+  const result = await submitKyc(user.id, user.walletAddress, files)
+  return reply.status(201).send(result)
 }

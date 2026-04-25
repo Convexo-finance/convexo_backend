@@ -30,7 +30,42 @@ export const creditScoreSubmitSchema = z.object({
   additionalContext: z.string().max(2000).optional(),
 })
 
-export type StartHumanityInput = z.infer<typeof startHumanitySchema>
-export type StartKycInput = z.infer<typeof startKycSchema>
-export type StartKybInput = z.infer<typeof startKybSchema>
+// ─── KYB Submit (manual — multipart) ─────────────────────────────────────────
+export const kybSubmitSchema = z.object({
+  companyName:         z.string().min(1).max(200),
+  country:             z.string().length(2),
+  companyType:         z.string().min(1).max(100),
+  incorporationNumber: z.string().min(1).max(100),
+  taxNumber:           z.string().min(1).max(100),
+  street:              z.string().min(1).max(300),
+  city:                z.string().min(1).max(100),
+  stateRegion:         z.string().max(100).optional(),
+  officeCountry:       z.string().length(2),
+  repFirstName:        z.string().min(1).max(100),
+  repLastName:         z.string().min(1).max(100),
+  repDocType:          z.string().min(1).max(100),
+  repDocNumber:        z.string().min(1).max(100),
+  repEmail:            z.string().email(),
+  repPhone:            z.string().min(1).max(30),
+  shareholders: z.string()
+    .transform((val) => JSON.parse(val))
+    .pipe(
+      z.array(z.object({
+        name:          z.string(),
+        idType:        z.string(),
+        idNumber:      z.string(),
+        nationality:   z.string(),
+        participation: z.number(),
+      }))
+    ),
+})
+
+// ─── KYC Submit (manual — multipart, no text fields) ─────────────────────────
+export const kycSubmitSchema = z.object({})
+
+export type StartHumanityInput    = z.infer<typeof startHumanitySchema>
+export type StartKycInput         = z.infer<typeof startKycSchema>
+export type StartKybInput         = z.infer<typeof startKybSchema>
 export type CreditScoreSubmitInput = z.infer<typeof creditScoreSubmitSchema>
+export type KybSubmitInput        = z.infer<typeof kybSubmitSchema>
+export type KycSubmitInput        = z.infer<typeof kycSubmitSchema>
