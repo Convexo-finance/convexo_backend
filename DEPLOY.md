@@ -1,6 +1,6 @@
-but # Convexo Backend — Deployment Guide
+# Convexo Backend — Deployment Guide
 
-> Updated: 2026-03-04
+> Updated: 2026-04-25 | Stack: Fastify 5 + PostgreSQL 16 + Redis 7 | Hosted: Railway
 
 ---
 
@@ -12,7 +12,7 @@ but # Convexo Backend — Deployment Guide
 | PostgreSQL | 16 |
 | Redis | 7 |
 | Docker | 24+ (optional) |
-| npm / pnpm | latest |
+| npm | latest |
 
 ---
 
@@ -27,216 +27,241 @@ npm install
 
 ### 2. Environment Variables
 
-Create `.env`:
+Copy `.env.example` → `.env` and fill in all values:
 
 ```env
-# Database
-DATABASE_URL="postgresql://postgres:password@localhost:5432/convexo"
+# Server
+NODE_ENV=development
+PORT=3001
+APP_URL=http://localhost:3001
+FRONTEND_URL=http://localhost:3000
+
+# Database (Railway reference on prod: ${{Postgres.DATABASE_URL}})
+DATABASE_URL=postgresql://convexo:secret@localhost:5432/convexo_db
 
 # Redis
-REDIS_URL="redis://localhost:6379"
+REDIS_URL=redis://localhost:6379
 
-# JWT
-JWT_SECRET="your-super-secret-jwt-key-min-32-chars"
-JWT_REFRESH_SECRET="your-refresh-secret-min-32-chars"
+# Auth
+JWT_SECRET=your-super-secret-jwt-key-min-32-chars
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=30d
+
+# Encryption (bank account AES-256-GCM — 64 hex chars)
+ENCRYPTION_KEY=your-64-hex-char-key
+
+# Network
+NETWORK_MODE=testnet          # mainnet | testnet — controls primary chain
+
+# RPC URLs
+BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/...
+BASE_SEPOLIA_RPC_URL=https://base-sepolia.g.alchemy.com/v2/...
+UNICHAIN_MAINNET_RPC_URL=https://unichain-mainnet.g.alchemy.com/v2/...
+UNICHAIN_SEPOLIA_RPC_URL=https://unichain-sepolia.g.alchemy.com/v2/...
+ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/...
+ARBITRUM_SEPOLIA_RPC_URL=https://arb-sepolia.g.alchemy.com/v2/...
 
 # Email (Resend)
-RESEND_API_KEY="re_..."
+RESEND_API_KEY=re_...
+RESEND_FROM_EMAIL=noreply@convexo.xyz
 
 # Telegram
-TELEGRAM_BOT_TOKEN="bot..."
-TELEGRAM_CHAT_ID="-100..."
+TELEGRAM_BOT_TOKEN=bot...
+TELEGRAM_OPS_CHAT_ID=-100...     # operations alerts
+TELEGRAM_ADMIN_CHAT_ID=-100...   # admin/KYC/funding alerts
 
 # Veriff (KYC — Individual)
-VERIFF_API_KEY="..."
-VERIFF_BASE_URL="https://stationapi.veriff.com"
-VERIFF_WEBHOOK_SECRET="..."
+VERIFF_API_KEY=...
+VERIFF_BASE_URL=https://stationapi.veriff.com
+VERIFF_WEBHOOK_SECRET=...
 
 # Sumsub (KYB — Business)
-SUMSUB_APP_TOKEN="..."
-SUMSUB_SECRET_KEY="..."
-SUMSUB_BASE_URL="https://api.sumsub.com"
+SUMSUB_APP_TOKEN=...
+SUMSUB_SECRET_KEY=...
+SUMSUB_BASE_URL=https://api.sumsub.com
+SUMSUB_WEBHOOK_SECRET=...
 
 # n8n (Credit Score — Business)
-N8N_WEBHOOK_URL="https://your-n8n.com/webhook/credit-score"
-N8N_WEBHOOK_SECRET="..."
+N8N_WEBHOOK_URL=https://your-n8n.com/webhook/credit-score
+N8N_WEBHOOK_SECRET=...
 
-# Pinata (IPFS)
-PINATA_API_KEY="..."
-PINATA_SECRET_API_KEY="..."
+# Pinata (IPFS — public documents only)
+PINATA_JWT=...
+PINATA_API_KEY=...
+PINATA_SECRET_KEY=...
+PINATA_GATEWAY=your-gateway.mypinata.cloud
+
+# Exchange rates (optional external feed)
+EXCHANGE_RATE_API_KEY=...
+RATES_CACHE_TTL_SECONDS=600
 
 # Admin
-ADMIN_WALLET_ADDRESS="0x156d3C1648ef2f50A8de590a426360Cf6a89C6f8"
+ADMIN_WALLET_ADDRESSES=0x156d3C1648ef2f50A8de590a426360Cf6a89C6f8
 
-# Server
-PORT=3001
-HOST=0.0.0.0
-NODE_ENV=development
+# Swagger (token-gate in production; dev is open)
+DOCS_SECRET=your-random-docs-secret-16-chars-min
 ```
 
 ### 3. Database Setup
 
 ```bash
-# Run migrations
-npm run db:migrate
+# Run all pending migrations
+npx prisma migrate deploy
 
-# Generate Prisma client
-npm run db:generate
+# Regenerate Prisma client after schema changes
+npx prisma generate
 
-# (Optional) Open Prisma Studio
-npm run db:studio
+# (Optional) Browse data in Studio
+npx prisma studio
 ```
 
 ### 4. Start Dev Server
 
 ```bash
 npm run dev
-# → Server at http://localhost:3001
-# → Swagger UI at http://localhost:3001/docs
+# → API at http://localhost:3001
+# → Swagger UI at http://localhost:3001/docs  (open in dev, token-gated in prod)
 ```
 
 ---
 
 ## Docker (Local Full Stack)
 
-### docker-compose.yml
-
-```yaml
-version: '3.8'
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: convexo
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  backend:
-    build: .
-    ports:
-      - "3001:3001"
-    env_file: .env
-    depends_on:
-      - postgres
-      - redis
-    command: sh -c "npm run db:migrate:prod && npm run start"
-
-volumes:
-  pgdata:
-```
-
 ```bash
-# Start everything
+# Start PostgreSQL + Redis + backend together
 docker-compose up -d
 
-# Check logs
+# Tail logs
 docker-compose logs -f backend
+```
+
+`docker-compose.yml` is in the repo root — mounts `.env`, runs `prisma migrate deploy` before starting.
+
+---
+
+## Railway Production Deployment
+
+### Linking
+
+```bash
+railway login
+railway link          # link to the Convexo project
+railway service link "convexo-api"   # target API service (not Postgres!)
+railway status        # confirm correct service before any deploy
+```
+
+### Deploy
+
+```bash
+railway up --detach   # build + deploy current branch
+railway logs          # tail live logs
+```
+
+`railway.toml` sets `preDeployCommand = "npx prisma migrate deploy"` — migrations run before the new container starts (zero-downtime for additive changes).
+
+### Required Railway Variables
+
+All env vars above plus the Railway-managed reference:
+
+```
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 ```
 
 ---
 
-## Onboarding API Endpoints
+## API Endpoints Reference
 
-The backend serves the following onboarding endpoints consumed by the frontend wizard:
-
+### Public (no auth)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/onboarding/status` | Returns `{ step, accountType, isComplete, nextAction }` |
-| `POST` | `/onboarding/type` | Sets account type: `{ accountType: "INDIVIDUAL" \| "BUSINESS" }` |
-| `POST` | `/onboarding/profile` | Saves profile (Individual or Business fields) |
-| `GET` | `/profile` | Returns full profile (type-specific fields) |
-| `PUT` | `/profile` | Updates editable contact fields |
+| GET | `/health` | Health check |
+| GET | `/auth/nonce` | SIWE nonce |
+| GET | `/rates` | All exchange rates |
+| GET | `/rates/:pair` | Single pair (e.g. `USDC-COP`) |
+| GET | `/pool/status` | Pool price + keeper status (primary chain) |
+| GET | `/pool/status/:chainId` | Pool status for specific chain |
+| GET | `/docs?token=<DOCS_SECRET>` | Swagger UI (token required in production) |
 
-### Onboarding Step State Machine
+### Authenticated (requireAuth)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/auth/verify` | SIWE verification → JWT |
+| POST | `/auth/refresh` | Refresh access token |
+| POST | `/auth/logout` | Blacklist token |
+| GET | `/users/me` | Current user |
+| GET/POST | `/onboarding/status`, `/onboarding/type`, `/onboarding/profile`, `/onboarding/complete` | Onboarding wizard |
+| GET/PUT | `/profile` | User profile |
+| GET/POST/PUT/DELETE | `/bank-accounts`, `/bank-accounts/:id`, `/bank-accounts/:id/default` | Bank accounts |
+| GET/POST/PUT/DELETE | `/contacts`, `/contacts/:id` | Contacts |
+| GET/POST/DELETE | `/documents`, `/documents/:id` | IPFS documents |
+| GET/POST | `/otc/orders`, `/otc/orders/:id` | OTC orders |
+| GET | `/vaults`, `/vaults/:address` | Tokenized bond vaults |
+| GET/POST | `/reputation`, `/reputation/sync` | NFT tier cache |
 
-```
-NOT_STARTED → TYPE_SELECTED → PROFILE_COMPLETE → HUMANITY_VERIFIED
-→ LP_VERIFIED → CREDIT_SCORE_SUBMITTED → CREDIT_SCORE_VERIFIED → COMPLETE
-```
+### Individual only
+| POST | `/verification/kyc/start`, `/verification/kyc/submit` | Veriff KYC |
+| GET | `/verification/kyc/status` | |
+
+### Business only
+| POST | `/verification/kyb/start`, `/verification/kyb/submit` | Sumsub KYB |
+| GET | `/verification/kyb/status` | |
+| POST | `/verification/credit-score/submit` | Credit score (multipart) |
+| GET | `/verification/credit-score/status` | |
+| POST | `/funding/fiat-to-ecop` | Mint ECOP from fiat request |
+| POST | `/funding/ecop-to-fiat` | Redeem ECOP to fiat request |
+| GET/POST | `/funding/requests`, `/funding/requests/:id` | Vault funding requests |
+
+### Webhooks (HMAC/Bearer — no JWT)
+| POST | `/webhooks/veriff` | Veriff KYC result |
+| POST | `/webhooks/sumsub` | Sumsub KYB result |
+| POST | `/webhooks/n8n/credit-score` | n8n credit score result |
 
 ---
 
 ## Webhook Configuration
 
-External services must be configured to call these URLs:
+| Service | Backend Endpoint | Verification |
+|---------|-----------------|--------------|
+| Veriff | `POST /webhooks/veriff` | `X-Hmac-Signature` (HMAC-SHA256) |
+| Sumsub | `POST /webhooks/sumsub` | `X-Payload-Digest` |
+| n8n | `POST /webhooks/n8n/credit-score` | `Authorization: Bearer <N8N_WEBHOOK_SECRET>` |
 
-| Service | Webhook URL | Header | Purpose |
-|---------|-------------|--------|---------|
-| Veriff | `https://api.convexo.io/webhooks/veriff/decision` | `X-Hmac-Signature` | KYC results (Individual) |
-| Sumsub | `https://api.convexo.io/webhooks/sumsub/event` | `X-App-Token` | KYB results (Business) |
-| n8n | `https://api.convexo.io/webhooks/n8n/credit-score` | `X-Webhook-Secret` | Credit score results (Business) |
-
-> HMAC secrets must match between the external service config and the backend `.env`.
-
----
-
-## Production Deployment (Railway / Render / VPS)
-
-1. Set all environment variables from `.env` above
-2. Set `NODE_ENV=production`
-3. Build command: `npm run build`
-4. Start command: `npm run db:migrate:prod && npm start`
-5. Health check: `GET /health` (returns 200)
-
-### Database (Production)
-
-```bash
-DATABASE_URL="postgresql://..." npm run db:migrate:prod
-```
-
----
-
-## Health Checks & Monitoring
-
-```bash
-# Backend health
-curl http://localhost:3001/health
-
-# Swagger API docs (dev only)
-open http://localhost:3001/docs
-
-# Prisma Studio (dev only)
-npm run db:studio
-```
+> Raw body capture is enabled in `app.ts` via `addContentTypeParser` — required for HMAC verification.
 
 ---
 
 ## Checklist Before Production
 
-### Secrets & Auth
+### Auth & Secrets
 - [ ] `JWT_SECRET` is cryptographically random (≥ 32 chars)
-- [ ] `JWT_REFRESH_SECRET` is different from JWT_SECRET
-- [ ] All `.env` secrets set (no defaults)
+- [ ] `ENCRYPTION_KEY` is exactly 64 hex chars (AES-256-GCM)
+- [ ] `DOCS_SECRET` set (≥ 16 chars) — Swagger protected in prod
+- [ ] All webhook secrets match external service configs
 
 ### Database & Cache
-- [ ] Database SSL enabled (`?sslmode=require` in `DATABASE_URL`)
-- [ ] Redis AUTH password set
-- [ ] DB migrations run on production
+- [ ] `DATABASE_URL` includes `?sslmode=require`
+- [ ] Redis AUTH password set (`REDIS_URL=redis://:password@host:6379`)
+- [ ] `npx prisma migrate deploy` run on production DB
+
+### Network
+- [ ] `NETWORK_MODE=mainnet` for production, `testnet` for staging
+- [ ] All RPC URLs for target chains are set and healthy
 
 ### External Services
-- [ ] Veriff webhook secret configured & URL registered
-- [ ] Sumsub webhook secret configured & URL registered
-- [ ] n8n webhook secret configured & URL registered
-- [ ] Pinata API keys active
-- [ ] Resend email domain verified
-- [ ] Telegram bot active
+- [ ] Veriff webhook URL registered in Veriff dashboard
+- [ ] Sumsub webhook URL registered in Sumsub dashboard
+- [ ] n8n webhook URL and secret match
+- [ ] Pinata JWT active, gateway configured
+- [ ] Resend domain verified, `RESEND_FROM_EMAIL` set
+- [ ] Telegram bot active, both chat IDs correct
 
 ### Security
-- [ ] CORS restricted to production frontend domain
-- [ ] Admin wallet address set correctly
-- [ ] Smart contract addresses verified on target chain
+- [ ] CORS is permissive (any origin) — access controlled by JWT only
+- [ ] `ADMIN_WALLET_ADDRESSES` set to the correct deployer address
+- [ ] No `.env` committed to git
 
-### Onboarding
-- [ ] `GET /onboarding/status` returns correct step for new users (NOT_STARTED)
-- [ ] `POST /onboarding/type` accepts INDIVIDUAL and BUSINESS
-- [ ] `POST /onboarding/profile` validates and stores per-type fields
-- [ ] `GET /profile` returns type-specific identity data
+### Smoke Tests
+- [ ] `GET /health` → 200
+- [ ] `GET /rates` → returns at least USDC-COP pair
+- [ ] `GET /pool/status` → returns pool price data
+- [ ] `GET /docs?token=<DOCS_SECRET>` → Swagger UI loads

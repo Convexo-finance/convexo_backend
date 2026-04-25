@@ -65,6 +65,9 @@ const envSchema = z.object({
   // Encryption
   ENCRYPTION_KEY: z.string().length(64).optional(),
 
+  // Docs access
+  DOCS_SECRET: z.string().min(16).optional(),
+
   // Admin Bootstrap
   ADMIN_WALLET_ADDRESSES: z.string().optional(),
 

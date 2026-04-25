@@ -3,7 +3,7 @@ import { env } from '../../config/env'
 import { NotFoundError, ForbiddenError } from '../../shared/errors'
 import { sendEmail, sendTelegram } from '../notifications/notifications.service'
 import { logger } from '../../shared/logger'
-import type { CreateFundingRequestInput, ReviewFundingRequestInput, ListFundingRequestsInput } from './funding.schema'
+import type { CreateFundingRequestInput, ReviewFundingRequestInput, ListFundingRequestsInput, FiatToEcopInput, EcopToFiatInput } from './funding.schema'
 
 // ─── User — submit funding request ───────────────────────────────────────────
 
@@ -104,6 +104,83 @@ export async function listAllFundingRequests(query: ListFundingRequestsInput) {
   ])
 
   return { items, total, limit: query.limit, offset: query.offset }
+}
+
+// ─── User — fiat → ECOP mint request ─────────────────────────────────────────
+
+export async function createFiatToEcop(userId: string, input: FiatToEcopInput) {
+  const contact = [
+    input.email    ? `email:${input.email}`       : null,
+    input.telegram ? `telegram:${input.telegram}` : null,
+  ].filter(Boolean).join(' | ')
+
+  const request = await db.fundingRequest.create({
+    data: {
+      userId,
+      amount:   input.fiatAmount.toString(),
+      currency: 'COP',
+      purpose:  `MINT: ${input.fiatAmount} COP → ${input.ecopAmount} ECOP to ${input.walletAddress}`,
+      collateral: contact || undefined,
+      status:   'PENDING',
+    },
+  })
+
+  if (env.TELEGRAM_ADMIN_CHAT_ID) {
+    sendTelegram({
+      userId,
+      chatId: env.TELEGRAM_ADMIN_CHAT_ID,
+      text: [
+        `💱 <b>New Fiat→ECOP Mint Request</b>`,
+        ``,
+        `Fiat:    <code>${input.fiatAmount} COP</code>`,
+        `ECOP:    <code>${input.ecopAmount}</code>`,
+        `Wallet:  <code>${input.walletAddress}</code>`,
+        `Contact: ${contact || 'none'}`,
+        `ID:      <code>${request.id}</code>`,
+      ].join('\n'),
+    }).catch((err) => logger.error({ err }, 'fiat-to-ecop Telegram notify failed'))
+  }
+
+  return { id: request.id }
+}
+
+// ─── User — ECOP → fiat redeem request ───────────────────────────────────────
+
+export async function createEcopToFiat(userId: string, input: EcopToFiatInput) {
+  const contact = [
+    input.email       ? `email:${input.email}`           : null,
+    input.telegram    ? `telegram:${input.telegram}`     : null,
+    input.bankAccount ? `bank:${input.bankAccount}`      : null,
+  ].filter(Boolean).join(' | ')
+
+  const request = await db.fundingRequest.create({
+    data: {
+      userId,
+      amount:   input.ecopAmount.toString(),
+      currency: 'ECOP',
+      purpose:  `REDEEM: ${input.ecopAmount} ECOP → ${input.fiatAmount} COP from ${input.walletAddress}`,
+      collateral: contact || undefined,
+      status:   'PENDING',
+    },
+  })
+
+  if (env.TELEGRAM_ADMIN_CHAT_ID) {
+    sendTelegram({
+      userId,
+      chatId: env.TELEGRAM_ADMIN_CHAT_ID,
+      text: [
+        `💱 <b>New ECOP→Fiat Redeem Request</b>`,
+        ``,
+        `ECOP:    <code>${input.ecopAmount}</code>`,
+        `Fiat:    <code>${input.fiatAmount} COP</code>`,
+        `Wallet:  <code>${input.walletAddress}</code>`,
+        `Contact: ${contact || 'none'}`,
+        `ID:      <code>${request.id}</code>`,
+      ].join('\n'),
+    }).catch((err) => logger.error({ err }, 'ecop-to-fiat Telegram notify failed'))
+  }
+
+  return { id: request.id }
 }
 
 // ─── Admin — review funding request ──────────────────────────────────────────

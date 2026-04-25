@@ -21,6 +21,25 @@ export const listFundingRequestsSchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 })
 
+export const fiatToEcopSchema = z.object({
+  fiatAmount:    z.coerce.number().positive(),
+  ecopAmount:    z.coerce.number().positive(),
+  walletAddress: z.string().min(10),
+  email:         z.string().email().optional(),
+  telegram:      z.string().optional(),
+})
+
+export const ecopToFiatSchema = z.object({
+  fiatAmount:    z.coerce.number().positive(),
+  ecopAmount:    z.coerce.number().positive(),
+  walletAddress: z.string().min(10),
+  email:         z.string().email().optional(),
+  telegram:      z.string().optional(),
+  bankAccount:   z.string().optional(),
+})
+
 export type CreateFundingRequestInput = z.infer<typeof createFundingRequestSchema>
 export type ReviewFundingRequestInput = z.infer<typeof reviewFundingRequestSchema>
 export type ListFundingRequestsInput  = z.infer<typeof listFundingRequestsSchema>
+export type FiatToEcopInput           = z.infer<typeof fiatToEcopSchema>
+export type EcopToFiatInput           = z.infer<typeof ecopToFiatSchema>

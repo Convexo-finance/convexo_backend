@@ -2,10 +2,22 @@ import type { FastifyInstance } from 'fastify'
 import { requireAuth } from '../../middleware/requireAuth'
 import { requireBusiness } from '../../middleware/requireAccountType'
 import { requireAdmin } from '../../middleware/requireAdmin'
-import { create, listMine, getMine, listAll, review } from './funding.controller'
+import { create, listMine, getMine, listAll, review, fiatToEcop, ecopToFiat } from './funding.controller'
 
 export async function fundingRoutes(app: FastifyInstance) {
   // ─── Business user ────────────────────────────────────────────────────────────
+  app.post('/funding/fiat-to-ecop', {
+    preHandler: [requireAuth],
+    schema: { tags: ['Funding'], summary: 'Request ECOP mint from fiat (any authenticated user)' },
+    handler: fiatToEcop,
+  })
+
+  app.post('/funding/ecop-to-fiat', {
+    preHandler: [requireAuth],
+    schema: { tags: ['Funding'], summary: 'Request ECOP redemption to fiat (any authenticated user)' },
+    handler: ecopToFiat,
+  })
+
   app.post('/funding/requests', {
     preHandler: [requireAuth, requireBusiness],
     schema: { tags: ['Funding'], summary: 'Submit a funding request (Business only)' },

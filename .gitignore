@@ -9,3 +9,8 @@ dist/
 
 # Logs
 *.log
+
+# Claude Code local overrides
+CLAUDE.local.md
+.claude/settings.local.json
+mcp.json

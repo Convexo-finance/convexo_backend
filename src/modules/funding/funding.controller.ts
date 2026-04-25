@@ -6,11 +6,15 @@ import {
   getMyFundingRequest,
   listAllFundingRequests,
   reviewFundingRequest,
+  createFiatToEcop,
+  createEcopToFiat,
 } from './funding.service'
 import {
   createFundingRequestSchema,
   reviewFundingRequestSchema,
   listFundingRequestsSchema,
+  fiatToEcopSchema,
+  ecopToFiatSchema,
 } from './funding.schema'
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -34,6 +38,18 @@ export async function getMine(
 ) {
   const req = await getMyFundingRequest(request.user.sub, request.params.id)
   return reply.send(req)
+}
+
+export async function fiatToEcop(request: FastifyRequest, reply: FastifyReply) {
+  const input = fiatToEcopSchema.parse(request.body)
+  const result = await createFiatToEcop(request.user.sub, input)
+  return reply.status(201).send(result)
+}
+
+export async function ecopToFiat(request: FastifyRequest, reply: FastifyReply) {
+  const input = ecopToFiatSchema.parse(request.body)
+  const result = await createEcopToFiat(request.user.sub, input)
+  return reply.status(201).send(result)
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────

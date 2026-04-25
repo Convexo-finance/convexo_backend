@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npx prisma *)",
+      "Bash(railway *)",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(railway up --detach)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)",
+      "Bash(npx prisma migrate reset *)",
+      "Bash(DROP TABLE *)",
+      "Bash(curl * | bash)"
+    ]
+  },
+  "model": "claude-sonnet-4-6"
+}

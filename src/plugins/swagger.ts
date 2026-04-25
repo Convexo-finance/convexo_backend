@@ -25,13 +25,22 @@ export default fp(async (app) => {
     },
   })
 
-  if (env.NODE_ENV !== 'production') {
-    await app.register(swaggerUi, {
-      routePrefix: '/docs',
-      uiConfig: {
-        docExpansion: 'list',
-        deepLinking: true,
-      },
+  if (env.NODE_ENV === 'production' && env.DOCS_SECRET) {
+    app.addHook('onRequest', async (request, reply) => {
+      if (!request.url.startsWith('/docs')) return
+      const url   = new URL(request.url, 'http://x')
+      const token = url.searchParams.get('token') ?? request.headers['x-docs-token']
+      if (token !== env.DOCS_SECRET) {
+        return reply.status(401).send({ error: 'Unauthorized' })
+      }
     })
   }
+
+  await app.register(swaggerUi, {
+    routePrefix: '/docs',
+    uiConfig: {
+      docExpansion: 'list',
+      deepLinking: true,
+    },
+  })
 })

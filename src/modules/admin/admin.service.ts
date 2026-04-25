@@ -66,7 +66,20 @@ export async function getUserDetails(id: string) {
     },
   })
   if (!user) throw new NotFoundError('User')
-  return user
+
+  const { individualProfile, businessProfile, verifications, reputation, ...rest } = user
+  return {
+    user: {
+      id:           rest.id,
+      walletAddress: rest.walletAddress,
+      accountType:  rest.accountType,
+      createdAt:    rest.createdAt,
+      email:        individualProfile?.email ?? businessProfile?.email ?? undefined,
+    },
+    profile: individualProfile ?? businessProfile ?? null,
+    verifications,
+    reputation,
+  }
 }
 
 // ─── Admin roles ──────────────────────────────────────────────────────────────
