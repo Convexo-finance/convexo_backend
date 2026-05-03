@@ -77,7 +77,7 @@ const envSchema = z.object({
   USDC_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   ECOP_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   MANUAL_PRICE_AGGREGATOR_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
-  POOL_KEEPER_CHAIN_ID: z.coerce.number().default(1301),  // Unichain Sepolia by default
+  POOL_KEEPER_CHAIN_ID: z.coerce.number().default(11155111), // ETH Sepolia — primary testnet (ZKPassport + pool live)
 })
 
 function parseEnv() {
