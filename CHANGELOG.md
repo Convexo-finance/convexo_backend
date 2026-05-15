@@ -5,15 +5,19 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
-## [v3.25] — 2026-05-14
+## [v3.26] — 2026-05-14
 
 ### Fixed
-- `pool.keeper.ts` JSDoc comment corrected: "defaults to 1301 — Unichain Sepolia" → "defaults to 11155111 — ETH Sepolia" (live pool is on ETH Sepolia, not Unichain Sepolia)
+- `pool.service.ts`: Phase 1 hook graceful fallback — `getPoolPriceStatus`, `lastRebalanceAt`, `rebalanceCooldown` calls wrapped in try/catch; token balance reads separated (always succeed); returns 200 with `poolPrice: 'N/A — Phase 1 hook'` instead of 500 when using PassportGatedHook on ETH Sepolia
+- Deployed to Railway — `GET /pool/status` confirmed returning 200 for chainId 11155111
+
+### Changed
+- `pool.keeper.ts` JSDoc comment corrected: "defaults to 1301 — Unichain Sepolia" → "defaults to 11155111 — ETH Sepolia"
 
 ### Audit
 - Cross-repo contract audit completed (see `AUDIT.md` at project root)
-- Identified that `pool.service.ts` uses Phase 2 ABI (`getPoolPriceStatus`, `rebalance`) which only exists in the future `ConvexoPoolHook` — Phase 1 `PassportGatedHook` does not have these functions; keeper is safe as long as `CONVEXO_HOOK_ADDRESS` is not set to the Phase 1 hook address
-- `ManualPriceAggregator` (v3.21, ETH Sepolia `0xBebDf2e6AdF4ca1e26531A778cdf669Da989EB79`) needs to be added to `src/config/contracts.ts` for Phase 2 rate sync wiring
+- MINTER_ROLE confirmed granted on LP_INDIVIDUALS, LP_BUSINESS, ECREDITSCORING on ETH Sepolia (all return `true` for `hasRole(MINTER_ROLE, 0x156d3C16...)`)
+- `ManualPriceAggregator` (v3.21, ETH Sepolia `0xBebDf2e6AdF4ca1e26531A778cdf669Da989EB79`) address wired in `rates.service.ts` via `MANUAL_PRICE_AGGREGATOR_ADDRESS` env var
 
 ---
 
