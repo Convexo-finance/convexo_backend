@@ -58,7 +58,7 @@ async function keeperTick(chainId: SupportedChainId): Promise<void> {
 
 /**
  * Start the pool keeper background loop.
- * Reads POOL_KEEPER_CHAIN_ID from env (defaults to 1301 — Unichain Sepolia).
+ * Reads POOL_KEEPER_CHAIN_ID from env (defaults to 11155111 — ETH Sepolia).
  * Runs immediately on start, then every 5 minutes.
  */
 export function startPoolKeeper(): void {

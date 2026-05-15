@@ -160,9 +160,34 @@ export async function fetchPoolStatusFromChain(chainId: SupportedChainId): Promi
   const publicClient = getPublicClient(chainId)
   const poolKey = buildPoolKey(usdcAddress, ecopAddress, hookAddress)
 
-  // Fetch all on-chain data in parallel
-  const [priceStatus, lastRebalanceAtRaw, rebalanceCooldownRaw, reserveUsdc, reserveEcop] =
-    await Promise.all([
+  // Read token balances — available regardless of hook phase
+  const [reserveUsdc, reserveEcop] = await Promise.all([
+    publicClient.readContract({
+      address: usdcAddress,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [hookAddress],
+    }),
+    publicClient.readContract({
+      address: ecopAddress,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [hookAddress],
+    }),
+  ])
+
+  // Try Phase 2 oracle functions — PassportGatedHook (Phase 1) does not have these;
+  // catch the revert and return a degraded status rather than a 500.
+  let poolSqrt = 0n
+  let oracleSqrt = 0n
+  let deviationBpsBig = 0n
+  let needsRebalance = false
+  let lastRebalanceAtRaw = 0n
+  let rebalanceCooldownRaw = 0n
+  let isPhase2 = false
+
+  try {
+    const [priceStatus, lastAt, cooldown] = await Promise.all([
       publicClient.readContract({
         address: hookAddress,
         abi: CONVEXO_HOOK_ABI,
@@ -179,35 +204,29 @@ export async function fetchPoolStatusFromChain(chainId: SupportedChainId): Promi
         abi: CONVEXO_HOOK_ABI,
         functionName: 'rebalanceCooldown',
       }),
-      publicClient.readContract({
-        address: usdcAddress,
-        abi: ERC20_ABI,
-        functionName: 'balanceOf',
-        args: [hookAddress],
-      }),
-      publicClient.readContract({
-        address: ecopAddress,
-        abi: ERC20_ABI,
-        functionName: 'balanceOf',
-        args: [hookAddress],
-      }),
     ])
+    ;[poolSqrt, oracleSqrt, deviationBpsBig, needsRebalance] = priceStatus
+    lastRebalanceAtRaw = lastAt
+    rebalanceCooldownRaw = cooldown
+    isPhase2 = true
+  } catch {
+    // Phase 1 hook (PassportGatedHook) — no oracle price band, no keeper functions.
+    // Pool price and oracle price are unavailable until Phase 2 ConvexoPoolHook is deployed.
+  }
 
-  const [poolSqrt, oracleSqrt, deviationBpsBig, needsRebalance] = priceStatus
-
-  // Convert prices to human-readable format (COP per USDC)
-  // The ratio direction depends on which is currency0/currency1
-  // We express as "ECOP per USDC" i.e. how many COP units per 1 USDC
-  const poolRaw = sqrtPriceX96ToPrice(poolSqrt)
-  const oracleRaw = sqrtPriceX96ToPrice(oracleSqrt)
-
-  // Determine if USDC is currency0 or currency1 to express price correctly
   const usdcIsToken0 = usdcAddress.toLowerCase() < ecopAddress.toLowerCase()
-  const poolPriceNum = usdcIsToken0 ? poolRaw : poolRaw > 0 ? 1 / poolRaw : 0
-  const oraclePriceNum = usdcIsToken0 ? oracleRaw : oracleRaw > 0 ? 1 / oracleRaw : 0
 
-  const lastRebalanceAtNum = lastRebalanceAtRaw === 0n ? null : Number(lastRebalanceAtRaw)
-  const cooldownSeconds = Number(rebalanceCooldownRaw)
+  let poolPrice = 'N/A — Phase 1 hook'
+  let oraclePrice = 'N/A — Phase 1 hook'
+
+  if (isPhase2) {
+    const poolRaw = sqrtPriceX96ToPrice(poolSqrt)
+    const oracleRaw = sqrtPriceX96ToPrice(oracleSqrt)
+    const poolPriceNum = usdcIsToken0 ? poolRaw : poolRaw > 0 ? 1 / poolRaw : 0
+    const oraclePriceNum = usdcIsToken0 ? oracleRaw : oracleRaw > 0 ? 1 / oracleRaw : 0
+    poolPrice = `${poolPriceNum.toFixed(2)} COP/USDC`
+    oraclePrice = `${oraclePriceNum.toFixed(2)} COP/USDC`
+  }
 
   const status: PoolStatus = {
     chainId,
@@ -215,18 +234,16 @@ export async function fetchPoolStatusFromChain(chainId: SupportedChainId): Promi
     oracleSqrtPriceX96: oracleSqrt.toString(),
     deviationBps: Number(deviationBpsBig),
     needsRebalance,
-    lastRebalanceAt: lastRebalanceAtNum,
-    rebalanceCooldownSeconds: cooldownSeconds,
-    oraclePrice: `${oraclePriceNum.toFixed(2)} COP/USDC`,
-    poolPrice: `${poolPriceNum.toFixed(2)} COP/USDC`,
+    lastRebalanceAt: lastRebalanceAtRaw === 0n ? null : Number(lastRebalanceAtRaw),
+    rebalanceCooldownSeconds: Number(rebalanceCooldownRaw),
+    oraclePrice,
+    poolPrice,
     reserveUsdc: reserveUsdc.toString(),
     reserveEcop: reserveEcop.toString(),
     updatedAt: new Date().toISOString(),
   }
 
-  // Cache in Redis
   await redis.setex(POOL_STATUS_KEY(chainId), POOL_STATUS_TTL, JSON.stringify(status))
-
   return status
 }
 

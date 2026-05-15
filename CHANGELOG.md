@@ -5,6 +5,18 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
+## [v3.25] — 2026-05-14
+
+### Fixed
+- `pool.keeper.ts` JSDoc comment corrected: "defaults to 1301 — Unichain Sepolia" → "defaults to 11155111 — ETH Sepolia" (live pool is on ETH Sepolia, not Unichain Sepolia)
+
+### Audit
+- Cross-repo contract audit completed (see `AUDIT.md` at project root)
+- Identified that `pool.service.ts` uses Phase 2 ABI (`getPoolPriceStatus`, `rebalance`) which only exists in the future `ConvexoPoolHook` — Phase 1 `PassportGatedHook` does not have these functions; keeper is safe as long as `CONVEXO_HOOK_ADDRESS` is not set to the Phase 1 hook address
+- `ManualPriceAggregator` (v3.21, ETH Sepolia `0xBebDf2e6AdF4ca1e26531A778cdf669Da989EB79`) needs to be added to `src/config/contracts.ts` for Phase 2 rate sync wiring
+
+---
+
 ## [v3.24] — 2026-04-25
 
 ### Added
