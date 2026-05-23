@@ -65,6 +65,11 @@ const envSchema = z.object({
   // Encryption
   ENCRYPTION_KEY: z.string().length(64).optional(),
 
+  // Anthropic (KYB + Credit Score PDF extraction via Claude)
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL:   z.string().default('claude-sonnet-4-6'),
+  KYB_CUSTOM_FLOW:   z.coerce.boolean().default(false), // gate the new custom flow; flip to true to activate
+
   // Docs access
   DOCS_SECRET: z.string().min(16).optional(),
 
