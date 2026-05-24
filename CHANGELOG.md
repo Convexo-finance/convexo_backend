@@ -5,6 +5,24 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
+## [v3.27.1] — 2026-05-24
+
+### Added — KYB + Credit Score P2 (backend wiring)
+- `prisma/schema.prisma` — KybSubmission gains nullable columns: `controllerFirstName`, `controllerLastName`, `controllerEmail`, `controllerPhone`, `controllerRelationship`, `controllerWallet`, `governance` (Json), `extractedData` (Json), `extractionVersion`. New `DocumentExtraction` model + `ExtractionStatus` enum (PENDING / EXTRACTING / COMPLETED / FAILED) with FK to `SubmissionDocument`
+- `prisma/migrations/20260523120000_kyb_extraction/migration.sql` — additive migration, no backfill. Railway auto-applies via `preDeployCommand`
+- `src/modules/verification/kyb-extraction.service.ts` — `uploadAndExtractKybDocument` (sync v1: store encrypted PDF → run Claude → save extraction → return data + confidence), `getMyKybDraft`, `patchKybDraft` (with editable-fields allowlist), `submitKybDraft` (validates required fields → promotes DRAFT/READY_FOR_REVIEW → PENDING). Discriminated dispatch on docType keeps `extractFromPdf<T>` types narrow
+- `src/modules/verification/kyb-extraction.routes.ts` — `POST /verification/kyb/upload` (multipart), `GET /verification/kyb/draft`, `PATCH /verification/kyb/draft/:id`, `POST /verification/kyb/draft/:id/submit`. All gated by `env.KYB_CUSTOM_FLOW` (returns 403 when off). All require `requireAuth + requireBusiness`
+- `src/app.ts` — register `kybExtractionRoutes` (always registered; feature flag enforced per-handler so flipping the env var in Railway needs no redeploy)
+- New KYB string statuses: `DRAFT`, `EXTRACTING`, `READY_FOR_REVIEW`, `MINTED` (KybSubmission.status is String — no enum migration needed)
+
+### Notes
+- Build clean: `npx tsc --noEmit` → 0 errors
+- `KYB_CUSTOM_FLOW=false` in Railway prod — routes return 403 until we flip it (P3 frontend will land first)
+- Migration is additive (nullable columns + new table) — zero-downtime
+- The plan's BullMQ worker for async extraction is deferred — sync is fine at testnet volume; swap later
+
+---
+
 ## [v3.27] — 2026-05-23
 
 ### Added — KYB + Credit Score P1 (storage + Claude extraction core)

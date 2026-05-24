@@ -331,6 +331,20 @@ model KybSubmission {
 
   documents  SubmissionDocument[]
 
+  // ─── P2 (v3.27) — custom KYB flow with Claude extraction ───────────────────
+  // status now also accepts: 'DRAFT' | 'EXTRACTING' | 'READY_FOR_REVIEW' | 'MINTED'
+  // (String, not enum — no migration required to add values).
+  controllerFirstName    String?
+  controllerLastName     String?
+  controllerEmail        String?
+  controllerPhone        String?
+  controllerRelationship String?  // 'CEO' | 'CFO' | 'AUTHORIZED_SIGNER' | 'OTHER'
+  controllerWallet       String?  // must match the connected wallet at submit time
+  governance             Json?    // extracted from Articles of Association
+  extractedData          Json?    // merged snapshot from per-doc extractions
+  extractionVersion      String?  // 'v1' for now; bump if prompts change
+  // ───────────────────────────────────────────────────────────────────────────
+
   status     String   @default("PENDING")
   reviewNote String?
   reviewedAt DateTime?
@@ -380,7 +394,45 @@ model SubmissionDocument {
   sizeBytes Int
   content   Bytes
 
+  extractions DocumentExtraction[]
+
   createdAt DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOCUMENT EXTRACTION (P2 — v3.27 — Claude per-document extraction job)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum ExtractionStatus {
+  PENDING
+  EXTRACTING
+  COMPLETED
+  FAILED
+}
+
+model DocumentExtraction {
+  id         String              @id @default(cuid())
+  documentId String
+  document   SubmissionDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  docType             String   // 'incorporation' | 'articles' | 'shareholders' | 'balance_sheet' | 'income_statement' | 'cash_flow'
+  status              ExtractionStatus @default(PENDING)
+
+  modelName           String?  // e.g. 'claude-sonnet-4-6'
+  systemPromptVersion String?  // e.g. 'kyb-incorporation-v1'
+  rawResponse         String?  // full Claude response — for audit / prompt tuning
+  extractedData       Json?    // parsed structured data
+  confidence          Json?    // per-field 0..1
+  promptTokens        Int?
+  completionTokens    Int?
+  errorMessage        String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([documentId])
+  @@index([status])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
