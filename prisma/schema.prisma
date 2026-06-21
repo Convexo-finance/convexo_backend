@@ -77,6 +77,12 @@ enum CreditScoreStatus {
   REJECTED
   NFT_REQUESTED
   COMPLETE
+  // Custom doc-upload flow (P4 — v3.28) — pre-submit draft lifecycle
+  DRAFT
+  EXTRACTING
+  READY_FOR_REVIEW
+  SCORE_COMPUTED
+  MINTED
 }
 
 enum BankAccountType {
@@ -388,6 +394,9 @@ model SubmissionDocument {
   kycSubmissionId String?
   kycSubmission   KycSubmission? @relation(fields: [kycSubmissionId], references: [id], onDelete: Cascade)
 
+  creditScoreRequestId String?
+  creditScoreRequest   CreditScoreRequest? @relation(fields: [creditScoreRequestId], references: [id], onDelete: Cascade)
+
   fieldName String
   filename  String
   mimeType  String
@@ -471,8 +480,17 @@ model CreditScoreRequest {
   submittedToN8nAt     DateTime?
   n8nCallbackAt        DateTime?
 
+  // Custom doc-upload flow (P4 — v3.28) — Claude extraction + preliminary score
+  extractedLineItems   Json?    // merged FinancialLineItems from the 3 statements
+  extractedIndicators  Json?    // computed IndicatorBreakdown
+  computedScore        Int?     // algorithm's preliminary 0-100 score (admin may override `score`)
+  computedTier         String?  // EXCELLENT | GOOD | FAIR | POOR
+  extractionVersion    String?  // 'v1'
+
   nftTokenId           String?
   nftMintedAt          DateTime?
+
+  documents            SubmissionDocument[]
 
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt

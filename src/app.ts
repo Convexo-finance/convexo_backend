@@ -17,6 +17,7 @@ import { onboardingRoutes } from './modules/onboarding/onboarding.routes'
 import { profileRoutes } from './modules/profile/profile.routes'
 import { verificationRoutes } from './modules/verification/verification.routes'
 import { kybExtractionRoutes } from './modules/verification/kyb-extraction.routes'
+import { creditScoreExtractionRoutes } from './modules/verification/credit-score-extraction.routes'
 import { bankAccountsRoutes } from './modules/bank-accounts/bank-accounts.routes'
 import { contactsRoutes } from './modules/contacts/contacts.routes'
 import { ratesRoutes } from './modules/rates/rates.routes'
@@ -79,6 +80,8 @@ export async function buildApp() {
   await app.register(onboardingRoutes)
   await app.register(profileRoutes)
   await app.register(verificationRoutes)
+  await app.register(kybExtractionRoutes)
+  await app.register(creditScoreExtractionRoutes)
   await app.register(bankAccountsRoutes)
   await app.register(contactsRoutes)
   await app.register(ratesRoutes)

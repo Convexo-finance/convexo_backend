@@ -1,3 +1,10 @@
+/**
+ * @deprecated Sumsub KYB is superseded by the custom Claude doc-upload flow
+ * (KYB-CREDIT-SCORE-PLAN.md). Kept live as a fallback while `KYB_CUSTOM_FLOW`
+ * rolls out. Scheduled for removal — together with `sumsub.webhook.ts` and its
+ * app.ts registration — once the custom flow has been live for one release
+ * (see plan §7 cutover runbook). Do not build new features on this path.
+ */
 import { createHmac } from 'crypto'
 import { env } from '../../config/env'
 import { db } from '../../config/database'

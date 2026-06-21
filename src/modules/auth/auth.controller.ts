@@ -32,12 +32,13 @@ export function buildAuthController(app: FastifyInstance) {
     ) {
       const body = verifySchema.parse(request.body)
 
-      await verifySiweSignature(body.message, body.signature, body.address)
+      // chainId comes from the *signed* message, not the client-supplied body.
+      const { chainId } = await verifySiweSignature(body.message, body.signature, body.address)
 
       const user = await upsertUser(
         body.address,
         body.authMethod,
-        body.chainId ?? 8453,
+        chainId,
         body.smartAccount,
       )
 
@@ -56,7 +57,14 @@ export function buildAuthController(app: FastifyInstance) {
     },
 
     async logout(request: FastifyRequest, reply: FastifyReply) {
-      await blacklistToken(request.user.sub)
+      // Revoke only this token (by jti), for its remaining lifetime, so the
+      // user's next login is unaffected. Tokens issued before jti existed have
+      // none — nothing to revoke, and they expire on their own.
+      const { jti, exp } = request.user
+      if (jti) {
+        const ttl = exp ? exp - Math.floor(Date.now() / 1000) : undefined
+        await blacklistToken(jti, ttl)
+      }
       return reply.send({ success: true })
     },
 

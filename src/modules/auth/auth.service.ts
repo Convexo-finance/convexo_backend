@@ -20,38 +20,72 @@ export async function generateNonce(address: string): Promise<string> {
 
 // ─── Verify SIWE ──────────────────────────────────────────────────────────────
 
+function allowedSiweDomains(): string[] {
+  return (env.SIWE_ALLOWED_DOMAINS ?? '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/**
+ * Verifies a SIWE login. Beyond the cryptographic signature, this validates the
+ * message's own claimed fields — address, domain (allowlist), expiration/notBefore
+ * — and consumes the single-use nonce. Returns the chainId from the *signed*
+ * message (not a client-supplied body field) so the caller can't be lied to.
+ *
+ * Hardened 2026-06-19 (auth audit): previously only the signature + nonce were
+ * checked, so a signature gathered on any origin/chain passed.
+ */
 export async function verifySiweSignature(
   message: string,
   signature: string,
   address: string,
-): Promise<void> {
-  // Verify the cryptographic signature with viem
+): Promise<{ chainId: number }> {
+  let siweMessage: SiweMessage
+  try {
+    siweMessage = new SiweMessage(message)
+  } catch {
+    throw new BadRequestError('Invalid SIWE message format')
+  }
+
+  // 1. The message must be for the address being authenticated
+  if (siweMessage.address.toLowerCase() !== address.toLowerCase()) {
+    throw new UnauthorizedError('SIWE address mismatch')
+  }
+
+  // 2. Domain allowlist (anti-phishing). Skipped only when unconfigured (dev).
+  const allowed = allowedSiweDomains()
+  if (allowed.length > 0 && !allowed.includes(siweMessage.domain.toLowerCase())) {
+    throw new UnauthorizedError('SIWE domain not allowed')
+  }
+
+  // 3. Time bounds, when present on the message
+  const now = Date.now()
+  if (siweMessage.expirationTime && Date.parse(siweMessage.expirationTime) < now) {
+    throw new UnauthorizedError('SIWE message has expired')
+  }
+  if (siweMessage.notBefore && Date.parse(siweMessage.notBefore) > now) {
+    throw new UnauthorizedError('SIWE message is not yet valid')
+  }
+
+  // 4. Cryptographic signature
   const isValid = await verifyMessage({
     address: address as `0x${string}`,
     message,
     signature: signature as `0x${string}`,
   })
-
   if (!isValid) {
     throw new UnauthorizedError('Invalid signature')
   }
 
-  // Parse the SIWE message to validate nonce
-  try {
-    const siweMessage = new SiweMessage(message)
-
-    // Verify nonce matches what we generated
-    const storedNonce = await redis.get(RedisKeys.siweNonce(address.toLowerCase()))
-    if (!storedNonce || storedNonce !== siweMessage.nonce) {
-      throw new UnauthorizedError('Invalid or expired nonce')
-    }
-
-    // Consume the nonce (one-time use)
-    await redis.del(RedisKeys.siweNonce(address.toLowerCase()))
-  } catch (err) {
-    if (err instanceof UnauthorizedError) throw err
-    throw new BadRequestError('Invalid SIWE message format')
+  // 5. Single-use nonce
+  const storedNonce = await redis.get(RedisKeys.siweNonce(address.toLowerCase()))
+  if (!storedNonce || storedNonce !== siweMessage.nonce) {
+    throw new UnauthorizedError('Invalid or expired nonce')
   }
+  await redis.del(RedisKeys.siweNonce(address.toLowerCase()))
+
+  return { chainId: siweMessage.chainId }
 }
 
 // ─── User upsert ──────────────────────────────────────────────────────────────
@@ -119,11 +153,19 @@ export function issueTokens(
     adminRole: user.adminRole?.role ?? null,
   }
 
+  // Each token gets its own jti so logout can revoke *that* token without
+  // bricking the user's future logins (auth audit fix, 2026-06-19).
+  const accessJti  = randomBytes(16).toString('hex')
+  const refreshJti = randomBytes(16).toString('hex')
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const accessToken = (app.jwt as any).sign(payload, { expiresIn: env.JWT_EXPIRES_IN })
+  const accessToken = (app.jwt as any).sign(
+    { ...payload, jti: accessJti },
+    { expiresIn: env.JWT_EXPIRES_IN },
+  )
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const refreshToken = (app.jwt as any).sign(
-    { ...payload, tokenType: 'refresh' },
+    { ...payload, jti: refreshJti, tokenType: 'refresh' },
     { expiresIn: env.JWT_REFRESH_EXPIRES_IN },
   )
 
@@ -132,13 +174,14 @@ export function issueTokens(
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
-export async function blacklistToken(userId: string): Promise<void> {
-  // Blacklist by userId so all tokens for this user are invalidated
-  await redis.setex(
-    RedisKeys.jwtBlacklist(userId),
-    RedisTTL.JWT_BLACKLIST,
-    '1',
-  )
+/**
+ * Revokes a single token by its `jti`. TTL defaults to the token's remaining
+ * lifetime so the key self-expires. Previously this blacklisted by userId for
+ * 30 days, which then rejected the user's *next* login too — fixed 2026-06-19.
+ */
+export async function blacklistToken(jti: string, ttlSeconds?: number): Promise<void> {
+  const ttl = ttlSeconds && ttlSeconds > 0 ? ttlSeconds : RedisTTL.JWT_BLACKLIST
+  await redis.setex(RedisKeys.jwtBlacklist(jti), ttl, '1')
 }
 
 // ─── Refresh Token ────────────────────────────────────────────────────────────

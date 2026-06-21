@@ -22,6 +22,8 @@ export interface JwtPayload {
   onboardingStep: OnboardingStep
   isAdmin: boolean
   adminRole: AdminRoleType | null
+  jti?: string          // per-token id — used for per-token revocation on logout
+  tokenType?: string    // 'refresh' on refresh tokens; absent on access tokens
   iat?: number
   exp?: number
   [key: string]: unknown

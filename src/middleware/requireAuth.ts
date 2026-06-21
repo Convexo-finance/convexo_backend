@@ -9,10 +9,16 @@ export async function requireAuth(
   try {
     await request.jwtVerify()
 
-    // Check if token is blacklisted (logout)
-    const token = request.headers.authorization?.replace('Bearer ', '')
-    if (token) {
-      const jti = request.user.sub
+    // Refresh tokens must not authorize protected routes (auth audit fix).
+    if (request.user.tokenType === 'refresh') {
+      throw new UnauthorizedError('Refresh token cannot be used for authentication')
+    }
+
+    // Per-token revocation: blacklist is keyed by the token's own jti, set on
+    // logout. (Previously keyed by userId — which then rejected the user's next
+    // login for 30 days. Fixed 2026-06-19.)
+    const jti = request.user.jti
+    if (jti) {
       const isBlacklisted = await redis.get(RedisKeys.jwtBlacklist(jti))
       if (isBlacklisted) {
         throw new UnauthorizedError('Token has been revoked')

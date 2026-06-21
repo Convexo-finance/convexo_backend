@@ -1,5 +1,10 @@
 # Convexo Backend — Claude Code Workspace
 
+> **Maintenance & standards:** doc/run/deploy conventions for this repo live in the root
+> [`MAINTENANCE.md`](../MAINTENANCE.md). Auth (SIWE + JWT) is specified in [`AUTH.md`](../AUTH.md) —
+> read it before touching `src/modules/auth`, `src/middleware/requireAuth.ts`, or token logic.
+> Health check: `GET /health`, `GET /pool/status` → 200, `npx tsc --noEmit` → 0.
+
 ## What this project is
 
 Convexo Backend is a production REST API powering the Convexo Protocol — a DeFi platform that bridges traditional finance and blockchain. It handles wallet-based authentication (SIWE/EIP-4361), a 10-step onboarding state machine, manual and automated KYC/KYB verification, AI-powered credit scoring via n8n, encrypted bank account management, OTC trade orders, tokenized bond vaults, USDC/ECOP pool monitoring with an on-chain keeper, and a full admin panel. Built on Fastify 5 + TypeScript + Prisma + PostgreSQL + Redis, deployed on Railway with automated migrations.
@@ -163,8 +168,13 @@ Client → POST /auth/refresh { refreshToken }
        ← { accessToken }
 
 Client → POST /auth/logout
-       ← 204 (token blacklisted in Redis for 30 days)
+       ← 200 { success: true } (this token's jti blacklisted in Redis for its remaining lifetime)
 ```
+
+> Auth is the canonical spec in root [`AUTH.md`](../AUTH.md). Key invariants: tokens carry a
+> per-token `jti`; logout/`requireAuth` revoke by `jti` (NEVER by userId — that locked users out
+> for 30 days, fixed v3.29); `requireAuth` rejects `tokenType: 'refresh'`; `/auth/verify` validates
+> the SIWE `domain` (`SIWE_ALLOWED_DOMAINS`), address, expiry, and nonce — not just the signature.
 
 ---
 
@@ -303,6 +313,9 @@ See `.env.example` for the full list.
 - `POST /verification/kyb/submit`
 - `POST /verification/credit-score/submit`, `GET /verification/credit-score/status`
 - `POST /funding/requests`, `GET /funding/requests`, `GET /funding/requests/:id`
+- **Custom doc-upload flow** (gated by `KYB_CUSTOM_FLOW`, 403 when off):
+  - KYB: `POST /verification/kyb/upload`, `GET /verification/kyb/draft`, `PATCH /verification/kyb/draft/:id`, `POST /verification/kyb/draft/:id/submit`
+  - Credit Score: `POST /verification/credit-score/upload`, `GET /verification/credit-score/draft`, `PATCH /verification/credit-score/draft/:id`, `POST /verification/credit-score/draft/:id/submit`
 
 ### OTC (requireAuth)
 - `POST /otc/orders`, `GET /otc/orders`, `GET /otc/orders/:id`

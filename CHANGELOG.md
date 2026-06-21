@@ -5,6 +5,45 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
+## [v3.29] — 2026-06-19
+
+### Fixed — auth audit critical findings (see AUDIT-AUTH-2026-06-19.md)
+- **🔴 Logout no longer locks the user out.** `blacklistToken` previously keyed by `userId` with a 30-day TTL; `requireAuth` checked the same key but login/refresh never cleared it, so a user who logged out and back in had every authenticated request rejected as "revoked" for 30 days. Tokens now carry a per-token `jti`; logout blacklists only that `jti` (TTL = the token's remaining lifetime); `requireAuth` checks by `jti`. Deploying this also frees anyone currently stuck (the old userId keys are no longer consulted). — `auth.service.ts`, `auth.controller.ts`, `requireAuth.ts`, `types.ts`
+- **🔴 SIWE message now validated.** `verifySiweSignature` previously checked only the signature + nonce — `domain`, `address`, `chainId`, and expiration in the signed message were ignored, so a signature gathered on any origin/chain passed. Now validates: message `address` == authenticating address, `domain` ∈ `SIWE_ALLOWED_DOMAINS` allowlist (anti-phishing; skipped when unset for dev), `expirationTime`/`notBefore` bounds, then signature, then single-use nonce. The recorded `chainId` now comes from the signed message, not the client-supplied body. New env `SIWE_ALLOWED_DOMAINS`.
+- **🔴 Refresh tokens can no longer authorize protected routes.** `requireAuth` now rejects any token with `tokenType: 'refresh'` (previously a 30-day refresh token worked as a bearer access token on every endpoint).
+
+### Notes
+- Build clean: `npx tsc --noEmit` → 0 errors
+- Set `SIWE_ALLOWED_DOMAINS=protocol.convexo.xyz,admin.convexo.xyz` on Railway prod (leave empty locally)
+- 🟡/🟢 audit items (signOut ordering, refresh-timeout, admin wallet-disconnect on logout, refresh rotation, dead code) tracked in AUDIT-AUTH-2026-06-19.md for a follow-up pass
+
+## [v3.28] — 2026-06-19
+
+### Added — Credit Score P4 (backend extraction + preliminary scoring)
+- `src/modules/verification/credit-score-extraction.service.ts` — `uploadAndExtractCreditDocument` (sync v1: store encrypted PDF → Claude extract → merge line items → recompute preliminary score), `getMyCreditDraft`, `patchCreditDraft` (editable line-item allowlist + live recompute), `submitCreditDraft` (requires revenue + computed score → promotes draft → PENDING). Hybrid scoring: `computeIndicators`/`indicatorsToScore` produce `computedScore`/`computedTier`; admin still overrides final `score`/`rating`
+- `src/modules/verification/credit-score-extraction.routes.ts` — `POST /verification/credit-score/upload` (multipart, `docType` ∈ balance_sheet/income_statement/cash_flow + optional `period`), `GET /verification/credit-score/draft`, `PATCH /verification/credit-score/draft/:id`, `POST /verification/credit-score/draft/:id/submit`. Gated by `env.KYB_CUSTOM_FLOW` (one flag for the whole custom flow), `requireAuth + requireBusiness`
+- `prisma/schema.prisma` — `CreditScoreRequest` gains `extractedLineItems`/`extractedIndicators` (Json), `computedScore` (Int), `computedTier`/`extractionVersion` (String), and a `documents SubmissionDocument[]` relation. `SubmissionDocument` gains nullable `creditScoreRequestId` FK. `CreditScoreStatus` enum gains `DRAFT`/`EXTRACTING`/`READY_FOR_REVIEW`/`SCORE_COMPUTED`/`MINTED`
+- `prisma/migrations/20260619000000_credit_score_extraction/migration.sql` — additive, idempotent (`ADD VALUE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), zero-downtime. Railway auto-applies via `preDeployCommand`
+- `src/shared/document-store.ts` — `storeDocument` now accepts `creditScoreRequestId` so credit-score PDFs flow through the same `DocumentExtraction` pipeline + admin download endpoint as KYB/KYC
+
+### Changed — admin endpoints surface extraction data (P6 support)
+- `src/modules/admin/admin.service.ts` — `getKybSubmission` now includes each document's latest `DocumentExtraction` (extractedData + confidence) for the admin extracted-vs-corrected diff; credit-score list now includes `documents` + their extractions. The new `CreditScoreRequest` scalar columns (`computedScore`/`computedTier`/`extractedIndicators`/`extractedLineItems`) already flow through (no `select` narrowing them)
+
+### Fixed
+- `src/app.ts` — **`kybExtractionRoutes` was imported in v3.27.1 but never registered** (the KYB upload/draft/submit endpoints 404'd). Now both `kybExtractionRoutes` and `creditScoreExtractionRoutes` are registered after `verificationRoutes`
+
+### Added — P7 cutover guard (legacy retirement)
+- `src/shared/errors.ts` — new `GoneError` (410)
+- `src/modules/verification/verification.routes.ts` — legacy `POST /verification/kyb/submit` and `POST /verification/credit-score/submit` now 410 **only when `KYB_CUSTOM_FLOW=true`** (preHandler `retiredWhenCustomFlowOn`), pointing callers at the new `/upload` endpoints. Atomic cutover: while the flag is off, legacy keeps working — no window where both flows are disabled
+- `src/modules/verification/sumsub.service.ts` — marked `@deprecated` (removal deferred to one stable release after cutover; see plan §7.1)
+
+### Notes
+- Build clean: `npx tsc --noEmit` → 0 errors; `npx prisma validate` → valid
+- `KYB_CUSTOM_FLOW=false` in Railway prod — all custom-flow routes return 403 until flipped; legacy submit endpoints stay live until then
+- **Go-live = manual:** set `ANTHROPIC_API_KEY` on Railway, then flip `KYB_CUSTOM_FLOW=true` (see plan §7.1 runbook)
+- Credit-score documents reuse the existing `/admin/submissions/documents/:docId/download` path (no admin change needed for download)
+- BullMQ async worker still deferred — sync extraction is fine at testnet volume
+
 ## [v3.27.1] — 2026-05-24
 
 ### Added — KYB + Credit Score P2 (backend wiring)

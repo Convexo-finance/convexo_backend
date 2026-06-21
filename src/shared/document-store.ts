@@ -24,8 +24,9 @@ export interface StoreDocumentInput {
   filename:        string
   mimeType:        string
   content:         Buffer
-  kybSubmissionId?: string
-  kycSubmissionId?: string
+  kybSubmissionId?:      string
+  kycSubmissionId?:      string
+  creditScoreRequestId?: string
 }
 
 export interface StoredDocument {
@@ -44,8 +45,8 @@ export async function storeDocument(input: StoreDocumentInput): Promise<StoredDo
   if (!ALLOWED_MIME.has(input.mimeType)) {
     throw new BadRequestError(`MIME type not allowed: ${input.mimeType}`)
   }
-  if (!input.kybSubmissionId && !input.kycSubmissionId) {
-    throw new BadRequestError('Document must be attached to a KYB or KYC submission.')
+  if (!input.kybSubmissionId && !input.kycSubmissionId && !input.creditScoreRequestId) {
+    throw new BadRequestError('Document must be attached to a KYB, KYC, or credit-score submission.')
   }
 
   const sha256    = createHash('sha256').update(input.content).digest('hex')
@@ -58,9 +59,10 @@ export async function storeDocument(input: StoreDocumentInput): Promise<StoredDo
       filename:        input.filename,
       mimeType:        input.mimeType,
       sizeBytes:       input.content.length,
-      content:         encrypted,
-      kybSubmissionId: input.kybSubmissionId ?? null,
-      kycSubmissionId: input.kycSubmissionId ?? null,
+      content:              encrypted,
+      kybSubmissionId:      input.kybSubmissionId ?? null,
+      kycSubmissionId:      input.kycSubmissionId ?? null,
+      creditScoreRequestId: input.creditScoreRequestId ?? null,
     },
     select: { id: true },
   })

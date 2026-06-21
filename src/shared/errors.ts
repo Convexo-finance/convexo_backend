@@ -44,3 +44,9 @@ export class BadRequestError extends AppError {
     super(400, message, 'BAD_REQUEST')
   }
 }
+
+export class GoneError extends AppError {
+  constructor(message: string) {
+    super(410, message, 'GONE')
+  }
+}

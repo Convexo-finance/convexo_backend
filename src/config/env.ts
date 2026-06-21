@@ -18,6 +18,11 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
 
+  // SIWE — comma-separated allowlist of accepted message `domain`s (e.g.
+  // "protocol.convexo.xyz,admin.convexo.xyz,localhost:3000,localhost:3002").
+  // When empty, domain validation is skipped (dev fallback) — set it in prod.
+  SIWE_ALLOWED_DOMAINS: z.string().optional(),
+
   // Pinata
   PINATA_JWT: z.string().optional(),
   PINATA_API_KEY: z.string().optional(),

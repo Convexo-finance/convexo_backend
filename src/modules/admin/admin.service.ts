@@ -231,6 +231,17 @@ export async function listAllCreditScoreRequests(query: {
             businessProfile: { select: { companyName: true, email: true } },
           },
         },
+        // Custom-flow statements (v3.28) — download + extracted-figure review
+        documents: {
+          select: {
+            id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true,
+            extractions: {
+              orderBy: { createdAt: 'desc' },
+              take:    1,
+              select: { id: true, docType: true, status: true, extractedData: true, confidence: true, completedAt: true },
+            },
+          },
+        },
       },
     }),
     db.creditScoreRequest.count({ where }),
@@ -329,7 +340,20 @@ export async function getKybSubmission(id: string) {
     where:   { id },
     include: {
       user:      submissionUserInclude,
-      documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+      documents: {
+        select: {
+          id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true,
+          // Custom-flow extraction (v3.27+) — for the extracted-vs-corrected admin diff
+          extractions: {
+            orderBy: { createdAt: 'desc' },
+            take:    1,
+            select: {
+              id: true, docType: true, status: true, modelName: true, systemPromptVersion: true,
+              extractedData: true, confidence: true, errorMessage: true, completedAt: true,
+            },
+          },
+        },
+      },
     },
   })
   if (!submission) throw new NotFoundError('KYB submission')
