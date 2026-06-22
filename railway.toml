@@ -3,7 +3,10 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-preDeployCommand = "npx prisma migrate deploy"
+# Retry migrate deploy a few times: Railway private networking (postgres.railway.internal)
+# can be briefly unready at preDeploy start, causing a transient P1001. Bounded so a real
+# migration error still fails fast after ~30s rather than hanging the whole window.
+preDeployCommand = 'sh -c "for i in 1 2 3 4 5 6; do npx prisma migrate deploy && exit 0; echo migrate-retry-$i-waiting-for-db; sleep 5; done; exit 1"'
 startCommand = "node dist/index.js"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
