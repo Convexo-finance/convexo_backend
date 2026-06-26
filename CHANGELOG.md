@@ -5,6 +5,21 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
+## [v3.30] — 2026-06-24 — Database migrated to Supabase + go-live
+
+### Changed — Postgres: Railway → Supabase
+- Railway's managed Postgres crashed (FAILED / no active deployment) — a live P0 outage (every DB-backed endpoint, e.g. `/rates`, was 500'ing; only `/health` masked it). Migrated the database to a dedicated **Supabase** project (`convexo-backend`, ref `vsddmsypcbwyhqzhymgi`, eu-central-1).
+- `prisma/schema.prisma` — added `directUrl = env("DIRECT_URL")`. Runtime uses the Supabase **transaction pooler** (`DATABASE_URL`, :6543, `pgbouncer=true`); `prisma migrate` uses the **session pooler** (`DIRECT_URL`, :5432). Always use the pooler host (IPv4); `db.<ref>.supabase.co` is IPv6-only and Railway can't reach it.
+- All 7 migrations applied cleanly to Supabase; **RLS enabled on all 20 tables** (closes the PostgREST anon-key hole — the `postgres` role Prisma connects as bypasses RLS, so the app is unaffected; we don't use the Supabase Data API).
+
+### Fixed — deploy mechanics (Railway)
+- Migrations now run **in the main container via `start.sh`** (with retry), not Railway's `preDeployCommand` — the preDeploy step has no private-network/DB access (P1001). `railway.toml`: `startCommand = "sh start.sh"`, `preDeployCommand` removed.
+- Documented that this service deploys via **`railway up --service convexo-api --detach`** (CLI upload), not GitHub auto-deploy.
+
+### Go-live
+- `KYB_CUSTOM_FLOW=true` flipped in Railway prod → the custom KYB + Credit-Score doc-upload flow is **ACTIVE**; legacy `/verification/{kyb,credit-score}/submit` now 410. `ANTHROPIC_API_KEY` + `SIWE_ALLOWED_DOMAINS` set.
+- Backend (auth fixes v3.29 + KYB/CS v3.28) live on Supabase; frontend wizards (P3/P5) + admin panels (P6) deployed to Vercel.
+
 ## [v3.29] — 2026-06-19
 
 ### Fixed — auth audit critical findings (see AUDIT-AUTH-2026-06-19.md)
