@@ -4,8 +4,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Supabase: runtime/client uses the transaction-mode pooler (DATABASE_URL, :6543, pgbouncer);
+  // `prisma migrate`/`db` use the session-mode pooler (DIRECT_URL, :5432). DIRECT_URL is only
+  // read by migration commands — set it to the same value as DATABASE_URL for plain local Postgres.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
