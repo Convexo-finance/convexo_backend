@@ -14,3 +14,9 @@ dist/
 CLAUDE.local.md
 .claude/settings.local.json
 mcp.json
+
+# Database dumps — never commit (contain user data)
+*.backup.gz
+*.backup
+*.dump
+*.sql.gz
