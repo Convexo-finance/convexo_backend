@@ -77,6 +77,7 @@ const envSchema = z.object({
 
   // Docs access
   DOCS_SECRET: z.string().min(16).optional(),
+  CRON_SECRET: z.string().min(16).optional(), // Vercel Cron bearer token for /pool/keeper/tick
 
   // Admin Bootstrap
   ADMIN_WALLET_ADDRESSES: z.string().optional(),

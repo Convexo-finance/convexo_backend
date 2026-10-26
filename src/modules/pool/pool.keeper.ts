@@ -57,6 +57,38 @@ async function keeperTick(chainId: SupportedChainId): Promise<void> {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * Validate keeper config. Returns the chain to watch, or null (reason logged) when the
+ * keeper must not run.
+ */
+function resolveKeeperChain(): SupportedChainId | null {
+  const rawChainId = env.POOL_KEEPER_CHAIN_ID
+  if (!isSupportedChain(rawChainId)) {
+    logger.error(
+      { chainId: rawChainId },
+      '[pool-keeper] POOL_KEEPER_CHAIN_ID is not a supported chain — keeper disabled',
+    )
+    return null
+  }
+
+  const chainId = rawChainId as SupportedChainId
+
+  // Validate required addresses are set before starting
+  if (!env.CONVEXO_HOOK_ADDRESS || !env.USDC_ADDRESS || !env.ECOP_ADDRESS) {
+    logger.warn(
+      '[pool-keeper] CONVEXO_HOOK_ADDRESS, USDC_ADDRESS, or ECOP_ADDRESS not set — keeper disabled',
+    )
+    return null
+  }
+
+  if (!env.KEEPER_PRIVATE_KEY) {
+    logger.warn('[pool-keeper] KEEPER_PRIVATE_KEY not set — keeper disabled')
+    return null
+  }
+
+  return chainId
+}
+
+/**
  * Start the pool keeper background loop.
  * Reads POOL_KEEPER_CHAIN_ID from env (defaults to 11155111 — ETH Sepolia).
  * Runs immediately on start, then every 5 minutes.
@@ -67,35 +99,25 @@ export function startPoolKeeper(): void {
     return
   }
 
-  const rawChainId = env.POOL_KEEPER_CHAIN_ID
-  if (!isSupportedChain(rawChainId)) {
-    logger.error(
-      { chainId: rawChainId },
-      '[pool-keeper] POOL_KEEPER_CHAIN_ID is not a supported chain — keeper will not start',
-    )
-    return
-  }
-
-  const chainId = rawChainId as SupportedChainId
-
-  // Validate required addresses are set before starting
-  if (!env.CONVEXO_HOOK_ADDRESS || !env.USDC_ADDRESS || !env.ECOP_ADDRESS) {
-    logger.warn(
-      '[pool-keeper] CONVEXO_HOOK_ADDRESS, USDC_ADDRESS, or ECOP_ADDRESS not set — keeper will not start',
-    )
-    return
-  }
-
-  if (!env.KEEPER_PRIVATE_KEY) {
-    logger.warn('[pool-keeper] KEEPER_PRIVATE_KEY not set — keeper will not start')
-    return
-  }
+  const chainId = resolveKeeperChain()
+  if (chainId === null) return
 
   logger.info({ chainId, intervalMs: KEEPER_INTERVAL_MS }, '[pool-keeper] starting')
 
   // Fire immediately, then on interval
   void keeperTick(chainId)
   keeperTimer = setInterval(() => void keeperTick(chainId), KEEPER_INTERVAL_MS)
+}
+
+/**
+ * Run a single keeper tick. Used on serverless hosts (Vercel Cron → GET /pool/keeper/tick),
+ * where a setInterval loop can't live. Returns false when the keeper is not configured.
+ */
+export async function runPoolKeeperOnce(): Promise<boolean> {
+  const chainId = resolveKeeperChain()
+  if (chainId === null) return false
+  await keeperTick(chainId)
+  return true
 }
 
 /**

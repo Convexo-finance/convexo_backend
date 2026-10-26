@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { getDefaultPoolStatus, getChainPoolStatus } from './pool.controller'
+import { runPoolKeeperOnce } from './pool.keeper'
+import { env } from '../../config/env'
 
 export async function poolRoutes(app: FastifyInstance) {
   // ─── Public — no auth required (read-only on-chain data) ─────────────────────
@@ -31,5 +33,18 @@ export async function poolRoutes(app: FastifyInstance) {
       },
     },
     handler: getChainPoolStatus,
+  })
+
+  // ─── Cron — Vercel calls this with `Authorization: Bearer $CRON_SECRET` ─────────
+
+  app.get('/pool/keeper/tick', {
+    schema: { hide: true },
+    handler: async (request, reply) => {
+      if (!env.CRON_SECRET || request.headers.authorization !== `Bearer ${env.CRON_SECRET}`) {
+        return reply.code(401).send({ error: 'Unauthorized' })
+      }
+      const ran = await runPoolKeeperOnce()
+      return { ran }
+    },
   })
 }

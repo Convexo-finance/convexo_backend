@@ -25,8 +25,8 @@ async function start() {
       logger.info(`📖 API docs at ${env.APP_URL}/docs`)
     }
 
-    // Start background keepers
-    startPoolKeeper()
+    // Start background keepers — on Vercel the keeper runs via Cron instead (vercel.json)
+    if (!process.env.VERCEL) startPoolKeeper()
   } catch (err) {
     logger.error(err, 'Failed to start server')
     process.exit(1)

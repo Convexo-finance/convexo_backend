@@ -1,6 +1,44 @@
 # Convexo Backend — Deployment Guide
 
-> Updated: 2026-04-25 | Stack: Fastify 5 + PostgreSQL 16 + Redis 7 | Hosted: Railway
+> Updated: 2026-10-26 | Stack: Fastify 5 + PostgreSQL 16 + Redis 7 | Hosted: **Vercel (API) + Supabase (DB)** — Railway retired
+
+---
+
+## Production hosting — Vercel + Supabase (since 2026-10-26)
+
+Railway is retired (the service and its Redis were gone by 2026-10-26; nothing had launched, so
+nothing was migrated). Production starts clean:
+
+| Piece | Where | Notes |
+|---|---|---|
+| API (Fastify) | Vercel project `convexo-backend`, domain `api.convexo.xyz` | Zero-config Fastify: Vercel detects `src/index.ts` and its `app.listen()` |
+| Postgres | **New** Supabase project in the `convexo.finance@gmail.com` account | `DATABASE_URL` = transaction pooler :6543 `?pgbouncer=true`; `DIRECT_URL` = session pooler :5432 |
+| Redis | Upstash (Vercel Marketplace) | `REDIS_URL=rediss://…` — ioredis works unchanged |
+| Pool keeper | Vercel Cron → `GET /pool/keeper/tick` every 5 min (`vercel.json`) | Needs `CRON_SECRET`; the `setInterval` loop only runs off-Vercel. A 5-minute schedule needs a Pro team (Hobby = daily) |
+
+**Migrations are a release step, not a build step** (a build-time migrate would let preview
+builds touch the production DB). From a trusted machine, with `DIRECT_URL` for the new project:
+
+```bash
+npx prisma migrate deploy        # creates the full schema, incl. 20260721000000_enable_rls
+```
+
+**Env vars** — names in `src/config/env.ts`. Fresh launch → generate new secrets, don't copy
+Railway's: `JWT_SECRET` (`openssl rand -hex 32`), `ENCRYPTION_KEY` (64 hex — losing it makes
+stored bank accounts unreadable, so store it in the password manager), `CRON_SECRET`,
+`DOCS_SECRET`, and a new `KEEPER_PRIVATE_KEY` wallet funded with testnet ETH.
+Set `APP_URL=https://api.convexo.xyz`, `FRONTEND_URL`, `SIWE_ALLOWED_DOMAINS`.
+
+**Known limit — uploads.** Vercel caps a request body at 4.5 MB; `@fastify/multipart` allows
+20 MB × 10 files. Large KYB/credit-score documents will fail until uploads go direct to
+Supabase Storage via signed URLs (replaces the planned R2 move, `src/shared/document-store.ts`).
+
+**Cut-over checklist**
+1. Supabase project created (convexo.finance) → `prisma migrate deploy` → advisors clean
+2. Vercel project linked to this repo (root = repo), env vars set, Upstash attached
+3. Preview deploy → `/health`, SIWE login, `/rates`, a KYB upload < 4.5 MB
+4. `api.convexo.xyz` → production; `NEXT_PUBLIC_API_URL` updated in protocol app, admin
+5. Update STATE.md §2, AUTH.md, CLAUDE.md; delete `railway.toml`, `start.sh`, `Dockerfile` (keep docker-compose for local)
 
 ---
 
