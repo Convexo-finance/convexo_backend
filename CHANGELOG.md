@@ -5,6 +5,23 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
+## [v3.31] — 2026-10-26 — Auth hardening for serverless (Vercel) + login/logout fixes
+
+### Fixed
+- **Every browser logout returned 400** — the custom `application/json` parser ran `JSON.parse('')` on body-less POSTs that still carry `Content-Type: application/json` (both frontends' fetch wrappers do this), so `POST /auth/logout` never reached the handler and server-side revocation never happened. Empty JSON bodies now parse as `undefined` (`src/app.ts`).
+- **CORS preflight rejected `PATCH`** — `methods` lacked it, so admin review actions (`PATCH /admin/kyb|kyc/submissions/:id/status`, `PATCH /otc/orders/:id/status`) and KYB/credit-score draft edits failed in the browser (`src/plugins/cors.ts`).
+- Refresh rate-limit now answers **429** instead of 400, so clients retry instead of treating it as a dead session.
+
+### Changed
+- `/auth/verify`: nonce is checked before signature work and consumed atomically (`DEL` must return 1), so a replayed message can't win a race and a failed signature no longer burns the user's nonce. SIWE `uri` host must equal `domain`. Rejection message names the offending domain.
+- Signature verification: offline ECDSA first (Privy embedded wallet / EOAs / EIP-7702-delegated EOAs), then **EIP-1271 / ERC-6492 on-chain fallback** on the chain from the signed message (smart-contract wallets such as Coinbase Smart Wallet in the admin).
+- `SIWE_ALLOWED_DOMAINS` accepts leading-wildcard subdomains (`*.preview.convexo.xyz`); warns once if empty in production.
+- **Refresh-token rotation + revocation**: `/auth/refresh` revokes the presented refresh token (single-use); `verifyRefreshToken` checks the jti blacklist; `/auth/logout` accepts an optional `{ refreshToken }` and revokes it too.
+- Per-route rate limit on `/auth/nonce` + `/auth/verify` (20/min/IP).
+
+### Added
+- `npm test` — `src/modules/auth/auth.e2e.test.ts`: in-process `app.inject` suite (13 cases) signing real SIWE messages with a local viem account; Redis/Prisma replaced by in-memory fakes.
+
 ## [v3.30] — 2026-06-24 — Database migrated to Supabase + go-live
 
 ### Changed — Postgres: Railway → Supabase

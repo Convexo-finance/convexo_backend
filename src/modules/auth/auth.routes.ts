@@ -5,8 +5,13 @@ import { buildAuthController } from './auth.controller'
 export async function authRoutes(app: FastifyInstance) {
   const ctrl = buildAuthController(app)
 
+  // Stricter than the global 100/min: these are unauthenticated and /verify can
+  // trigger an RPC call (EIP-1271/6492 fallback).
+  const authRateLimit = { rateLimit: { max: 20, timeWindow: '1 minute' } }
+
   // GET /auth/nonce?address=0x...
   app.get('/auth/nonce', {
+    config: authRateLimit,
     schema: {
       tags: ['Auth'],
       summary: 'Get SIWE nonce for a wallet address',
@@ -23,6 +28,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   // POST /auth/verify
   app.post('/auth/verify', {
+    config: authRateLimit,
     schema: {
       tags: ['Auth'],
       summary: 'Verify SIWE signature and issue JWT',
@@ -62,8 +68,15 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/logout', {
     schema: {
       tags: ['Auth'],
-      summary: 'Invalidate JWT token',
+      summary: 'Revoke this access token (and the refresh token, if sent)',
       security: [{ bearerAuth: [] }],
+      body: {
+        type: 'object',
+        nullable: true,
+        properties: {
+          refreshToken: { type: 'string' },
+        },
+      },
     },
     preHandler: [requireAuth],
     handler: ctrl.logout,

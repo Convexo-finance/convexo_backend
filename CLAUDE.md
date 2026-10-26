@@ -165,10 +165,10 @@ Client → POST /auth/verify { message, signature }
 Client → Authorization: Bearer {accessToken} on all protected requests
 
 Client → POST /auth/refresh { refreshToken }
-       ← { accessToken }
+       ← { accessToken, refreshToken, user }   (presented refresh token is revoked — single-use)
 
-Client → POST /auth/logout
-       ← 200 { success: true } (this token's jti blacklisted in Redis for its remaining lifetime)
+Client → POST /auth/logout { refreshToken? }
+       ← 200 { success: true } (access jti — and refresh jti if sent — blacklisted for remaining lifetime)
 ```
 
 > Auth is the canonical spec in root [`AUTH.md`](../AUTH.md). Key invariants: tokens carry a
@@ -273,7 +273,7 @@ See `.env.example` for the full list.
 | Key | TTL | Purpose |
 |-----|-----|---------|
 | `siwe:nonce:{address}` | 5 min | One-time SIWE nonce |
-| `jwt:blacklist:{userId}` | 30 days | Revoked tokens (logout) |
+| `jwt:blacklist:{jti}` | token's remaining life | Revoked access/refresh tokens (logout, refresh rotation) |
 | `rate:{pair}` | 10 min | Exchange rate cache |
 | `reputation:{userId}` | 30 min | NFT tier cache |
 | `pool:status:{chainId}` | 60 s | Pool price + rebalance status |

@@ -4,7 +4,7 @@ import {
   verifySiweSignature,
   upsertUser,
   issueTokens,
-  blacklistToken,
+  revokeDecodedToken,
   verifyRefreshToken,
   checkRefreshRateLimit,
   findUserById,
@@ -13,6 +13,7 @@ import {
   getNonceSchema,
   verifySchema,
   refreshSchema,
+  logoutSchema,
 } from './auth.schema'
 
 export function buildAuthController(app: FastifyInstance) {
@@ -57,13 +58,18 @@ export function buildAuthController(app: FastifyInstance) {
     },
 
     async logout(request: FastifyRequest, reply: FastifyReply) {
-      // Revoke only this token (by jti), for its remaining lifetime, so the
-      // user's next login is unaffected. Tokens issued before jti existed have
-      // none — nothing to revoke, and they expire on their own.
-      const { jti, exp } = request.user
-      if (jti) {
-        const ttl = exp ? exp - Math.floor(Date.now() / 1000) : undefined
-        await blacklistToken(jti, ttl)
+      // Revoke this access token (by jti) for its remaining lifetime, so the
+      // user's next login is unaffected. If the client also sends its refresh
+      // token, revoke that too — otherwise it would stay usable for 30 days.
+      const { refreshToken } = logoutSchema.parse(request.body ?? {})
+      await revokeDecodedToken(request.user)
+      if (refreshToken) {
+        try {
+          const refresh = await verifyRefreshToken(app, refreshToken)
+          if (refresh.sub === request.user.sub) await revokeDecodedToken(refresh)
+        } catch {
+          // Already invalid/expired/revoked — nothing to do.
+        }
       }
       return reply.send({ success: true })
     },
@@ -72,13 +78,17 @@ export function buildAuthController(app: FastifyInstance) {
       const { refreshToken } = refreshSchema.parse(request.body)
 
       // Verify the refresh token and extract payload
-      const payload = verifyRefreshToken(app, refreshToken)
+      const payload = await verifyRefreshToken(app, refreshToken)
 
       // Rate limit: max 5 refresh calls per minute per user
       await checkRefreshRateLimit(payload.sub)
 
       // Re-fetch user to get latest data (role changes, onboarding progress, etc.)
       const user = await findUserById(payload.sub)
+
+      // Rotation: the presented refresh token is single-use. A replayed (stolen
+      // or duplicated) refresh token is rejected by verifyRefreshToken above.
+      await revokeDecodedToken(payload)
 
       const tokens = issueTokens(app, user)
 

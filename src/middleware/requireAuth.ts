@@ -1,5 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
-import { redis, RedisKeys } from '../config/redis'
+import { isTokenRevoked } from '../modules/auth/auth.service'
 import { UnauthorizedError } from '../shared/errors'
 
 export async function requireAuth(
@@ -17,12 +17,8 @@ export async function requireAuth(
     // Per-token revocation: blacklist is keyed by the token's own jti, set on
     // logout. (Previously keyed by userId — which then rejected the user's next
     // login for 30 days. Fixed 2026-06-19.)
-    const jti = request.user.jti
-    if (jti) {
-      const isBlacklisted = await redis.get(RedisKeys.jwtBlacklist(jti))
-      if (isBlacklisted) {
-        throw new UnauthorizedError('Token has been revoked')
-      }
+    if (await isTokenRevoked(request.user.jti)) {
+      throw new UnauthorizedError('Token has been revoked')
     }
   } catch (err) {
     const error = err instanceof UnauthorizedError ? err : new UnauthorizedError('Invalid or expired token')

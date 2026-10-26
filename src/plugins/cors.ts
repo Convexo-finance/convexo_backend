@@ -8,7 +8,9 @@ export default fp(async (app) => {
     // This allows local dev, staging, and any frontend domain to connect.
     origin: (origin, cb) => cb(null, origin ?? '*'),
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    // PATCH is used by admin review + KYB draft routes; without it the browser
+    // preflight fails and the request never reaches the API.
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 })
