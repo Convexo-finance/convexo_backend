@@ -385,8 +385,15 @@ model KycSubmission {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SUBMISSION DOCUMENT (binary file stored in DB)
+// SUBMISSION DOCUMENT (metadata row — bytes live in Supabase Storage)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// PENDING  = row + signed upload URL issued, object not yet verified
+// UPLOADED = backend confirmed the object exists and matches size / type / magic bytes
+enum DocumentUploadStatus {
+  PENDING
+  UPLOADED
+}
 
 model SubmissionDocument {
   id     String @id @default(cuid())
@@ -404,12 +411,19 @@ model SubmissionDocument {
   fieldName String
   filename  String
   mimeType  String
-  sizeBytes Int
-  content   Bytes
+  sizeBytes Int    // declared at intent time, verified against the stored object on confirm
+
+  // Object key in the private `documents` bucket: <userId>/<parentId>/<uuid>-<safeName>
+  storagePath String               @unique
+  status      DocumentUploadStatus @default(PENDING)
+  sha256      String?              // computed on confirm
+  uploadedAt  DateTime?
 
   extractions DocumentExtraction[]
 
   createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

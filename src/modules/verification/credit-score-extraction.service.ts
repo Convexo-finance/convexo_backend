@@ -1,7 +1,7 @@
 import { db } from '../../config/database'
 import { logger } from '../../shared/logger'
 import { BadRequestError } from '../../shared/errors'
-import { storeDocument } from '../../shared/document-store'
+import { createUploadIntent, confirmUpload, type UploadIntentBody } from '../../shared/document-store'
 import { extractFromPdf } from '../../shared/extraction.service'
 import {
   indicatorsToScore,
@@ -21,8 +21,8 @@ import {
 /**
  * Credit Score custom flow (P4) — replaces the n8n POC (see KYB-CREDIT-SCORE-PLAN.md).
  *
- * Sync extraction in v1: upload → store → Claude → save → recompute preliminary
- * score → return. Mirrors `kyb-extraction.service.ts`. Behind env.KYB_CUSTOM_FLOW
+ * Direct-to-Storage upload (Vercel caps bodies at 4.5 MB): upload-url → browser PUT
+ * → confirm (verify → Claude → save → recompute preliminary score → return). Mirrors `kyb-extraction.service.ts`. Behind env.KYB_CUSTOM_FLOW
  * (one flag gates the whole custom doc-extraction flow). Business accounts only.
  *
  * Hybrid scoring: the algorithm computes a preliminary `computedScore`/`computedTier`
@@ -110,43 +110,51 @@ async function recomputeAndPersist(requestId: string, lineItems: Record<string, 
   return result
 }
 
-// ─── Inputs ───────────────────────────────────────────────────────────────────
-
-export interface UploadCreditDocumentInput {
-  userId:   string
-  docType:  CreditDocType
-  buffer:   Buffer
-  filename: string
-  mimeType: string
-  period?:  string
-}
-
 // ─── Public service functions ─────────────────────────────────────────────────
 
-/**
- * Upload a financial statement, store encrypted, run Claude extraction
- * synchronously, merge the line items into the request, recompute the
- * preliminary score, and return the parsed data + confidence + computed score.
- */
-export async function uploadAndExtractCreditDocument(input: UploadCreditDocumentInput) {
-  const requestId = await getOrCreateDraft(input.userId, input.period)
-
-  const stored = await storeDocument({
-    userId:               input.userId,
-    fieldName:            input.docType,
-    filename:             input.filename,
-    mimeType:             input.mimeType,
-    content:              input.buffer,
-    creditScoreRequestId: requestId,
+/** Step 1 — get-or-create the draft request and issue a signed upload URL for one statement. */
+export async function createCreditUploadIntent(
+  userId: string,
+  docType: CreditDocType,
+  body: UploadIntentBody,
+  period?: string,
+) {
+  const requestId = await getOrCreateDraft(userId, period)
+  const intent = await createUploadIntent({
+    userId,
+    purpose:   'credit_score',
+    fieldName: docType,
+    parent:    { creditScoreRequestId: requestId },
+    ...body,
   })
+  return { requestId, docType, ...intent }
+}
+
+/**
+ * Step 2 — verify the stored statement, run Claude extraction synchronously, merge
+ * the line items into the request, recompute the preliminary score, and return the
+ * parsed data + confidence + computed score. Re-callable to retry extraction.
+ */
+export async function confirmAndExtractCreditDocument(userId: string, documentId: string) {
+  const doc = await confirmUpload(userId, documentId, 'credit_score')
+  const docType = doc.fieldName as CreditDocType
+
+  const draft = doc.creditScoreRequestId
+    ? await db.creditScoreRequest.findFirst({
+        where:  { id: doc.creditScoreRequestId, userId, status: { in: [...DRAFT_STATUSES] } },
+        select: { id: true },
+      })
+    : null
+  if (!draft) throw new BadRequestError('This document is not attached to an active credit-score draft.')
+  const requestId = draft.id
 
   const job = await db.documentExtraction.create({
-    data: { documentId: stored.documentId, docType: input.docType, status: 'EXTRACTING', startedAt: new Date() },
+    data: { documentId: doc.documentId, docType, status: 'EXTRACTING', startedAt: new Date() },
     select: { id: true },
   })
 
   try {
-    const result = await extractForDocType(input.docType, input.buffer)
+    const result = await extractForDocType(docType, doc.buffer)
 
     await db.documentExtraction.update({
       where: { id: job.id },
@@ -184,9 +192,9 @@ export async function uploadAndExtractCreditDocument(input: UploadCreditDocument
 
     return {
       requestId,
-      documentId:   stored.documentId,
+      documentId:   doc.documentId,
       extractionId: job.id,
-      docType:      input.docType,
+      docType,
       status:       'COMPLETED' as const,
       data:         result.data,
       confidence:   result.confidence,
@@ -194,7 +202,7 @@ export async function uploadAndExtractCreditDocument(input: UploadCreditDocument
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
-    logger.error({ extractionId: job.id, docType: input.docType, err: errorMessage }, 'credit_score.extraction_failed')
+    logger.error({ extractionId: job.id, docType, err: errorMessage }, 'credit_score.extraction_failed')
     await db.documentExtraction.update({
       where: { id: job.id },
       data:  { status: 'FAILED', errorMessage, completedAt: new Date() },
@@ -209,6 +217,7 @@ export async function getMyCreditDraft(userId: string) {
     where: { userId, status: { in: [...DRAFT_STATUSES] } },
     include: {
       documents: {
+        where:  { status: 'UPLOADED' },
         select: {
           id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true,
           extractions: {

@@ -23,6 +23,7 @@ convexo-backend/
 │   ├── config/
 │   │   ├── env.ts                # Zod-validated env schema — fails fast on startup
 │   │   ├── database.ts           # Prisma singleton (connect/disconnect)
+│   │   ├── supabase.ts           # Service-role Supabase client — Storage bucket for documents
 │   │   ├── redis.ts              # ioredis singleton + key helpers + TTL constants
 │   │   ├── chains.ts             # Supported chains (Base, Unichain, Arbitrum, Ethereum + testnets)
 │   │   └── contracts.ts          # NFT contract addresses by chain + ABIs
@@ -31,7 +32,7 @@ convexo-backend/
 │   │   ├── swagger.ts            # OpenAPI /docs — open in dev, DOCS_SECRET token-gated in prod
 │   │   ├── cors.ts               # Reflect any origin, JWT controls access
 │   │   ├── rateLimit.ts          # 100 req/min global (Redis-backed)
-│   │   ├── multipart.ts          # 20 MB file upload limit, 10 files max
+│   │   ├── multipart.ts          # Scoped to documentsRoutes only (Pinata), 1 file ≤ 4 MB
 │   │   └── auth.ts               # @fastify/jwt registration
 │   │
 │   ├── middleware/               # Composable preHandler functions
@@ -65,6 +66,7 @@ convexo-backend/
 │   │   └── n8n.webhook.ts        # Credit score result (Bearer token)
 │   │
 │   └── shared/
+│       ├── document-store.ts     # KYB/KYC/CS docs: signed upload intents, confirm, signed downloads
 │       ├── errors.ts             # AppError hierarchy: NotFound/Unauthorized/Forbidden/etc.
 │       ├── logger.ts             # Pino singleton (JSON in prod, pretty in dev)
 │       ├── pagination.ts         # Shared pagination helpers
@@ -119,7 +121,9 @@ convexo-backend/
 - Never use `git push --force` without explicit confirmation
 - Never drop database columns without a migration that handles existing data
 - Never deploy without running `npx tsc --noEmit` first
-- Never store sensitive documents (KYB/KYC files) on Pinata — use `SubmissionDocument` (PostgreSQL bytea) instead
+- Never store sensitive documents (KYB/KYC files) on Pinata — use `src/shared/document-store.ts` (private Supabase Storage bucket + `SubmissionDocument` row)
+- Never accept KYB/KYC/credit-score file bytes through the API (Vercel 4.5 MB body cap) — issue a signed upload URL, then confirm
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` or a public URL to the `documents` bucket
 - Never add raw SQL to source code — only in migration files
 - Never skip the `requireAuth` middleware on routes that return user data
 
@@ -263,6 +267,9 @@ After every meaningful change (new feature, bug fix, schema change, deployment),
 | `ENCRYPTION_KEY` | Yes | AES-256 key for bank account encryption (64 hex chars) |
 | `TELEGRAM_ADMIN_CHAT_ID` | Opt | Admin alert chat for KYB/KYC submissions |
 | `NETWORK_MODE` | Yes | `mainnet` or `testnet` — controls which chain is primary |
+| `SUPABASE_URL` | Yes (docs) | Supabase project URL — Storage for KYB/KYC/credit-score documents |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes (docs) | Server-only service-role key (bypasses RLS) |
+| `SUPABASE_STORAGE_BUCKET` | Opt | Defaults to `documents` (created by `supabase/storage.sql`) |
 
 See `.env.example` for the full list.
 
@@ -302,7 +309,7 @@ See `.env.example` for the full list.
 
 ### Individual only (requireAuth + requireIndividual)
 - `POST /verification/kyc/start`, `GET /verification/kyc/status`
-- `POST /verification/kyc/submit`
+- `POST /verification/kyc/upload-url`, `POST /verification/kyc/documents/:documentId/confirm`, `POST /verification/kyc/submit` (JSON)
 
 ### Any authenticated user (requireAuth)
 - `POST /funding/fiat-to-ecop` — mint ECOP from fiat request; stored as FundingRequest
@@ -310,12 +317,12 @@ See `.env.example` for the full list.
 
 ### Business only (requireAuth + requireBusiness)
 - `POST /verification/kyb/start`, `GET /verification/kyb/status`
-- `POST /verification/kyb/submit`
-- `POST /verification/credit-score/submit`, `GET /verification/credit-score/status`
+- `POST /verification/kyb/submit`, `POST /verification/credit-score/submit` — **410 Gone** (legacy multipart)
+- `GET /verification/credit-score/status`
 - `POST /funding/requests`, `GET /funding/requests`, `GET /funding/requests/:id`
 - **Custom doc-upload flow** (gated by `KYB_CUSTOM_FLOW`, 403 when off):
-  - KYB: `POST /verification/kyb/upload`, `GET /verification/kyb/draft`, `PATCH /verification/kyb/draft/:id`, `POST /verification/kyb/draft/:id/submit`
-  - Credit Score: `POST /verification/credit-score/upload`, `GET /verification/credit-score/draft`, `PATCH /verification/credit-score/draft/:id`, `POST /verification/credit-score/draft/:id/submit`
+  - KYB: `POST /verification/kyb/upload-url`, `POST /verification/kyb/documents/:documentId/confirm`, `GET /verification/kyb/draft`, `PATCH /verification/kyb/draft/:id`, `POST /verification/kyb/draft/:id/submit`
+  - Credit Score: `POST /verification/credit-score/upload-url`, `POST /verification/credit-score/documents/:documentId/confirm`, `GET /verification/credit-score/draft`, `PATCH /verification/credit-score/draft/:id`, `POST /verification/credit-score/draft/:id/submit`
 
 ### OTC (requireAuth)
 - `POST /otc/orders`, `GET /otc/orders`, `GET /otc/orders/:id`
@@ -338,7 +345,7 @@ See `.env.example` for the full list.
 - `PATCH /admin/kyb/submissions/:id/status` (VERIFIER+)
 - `GET /admin/kyc/submissions`, `GET /admin/kyc/submissions/:id` (VIEWER+)
 - `PATCH /admin/kyc/submissions/:id/status` (VERIFIER+)
-- `GET /admin/submissions/documents/:docId` (VIEWER+)
+- `GET /admin/submissions/documents/:docId/url` (VIEWER+) — 60 s signed URL JSON; `GET /admin/submissions/documents/:docId` 302s to it
 - `GET /admin/otc/orders`, `PUT /admin/otc/orders/:id/status` (VIEWER+/VERIFIER+)
 - `GET /admin/rates`, `POST /admin/rates`, `DELETE /admin/rates/:pair` (VIEWER+/VERIFIER+)
 - `GET /admin/funding/requests`, `PUT /admin/funding/requests/:id/review` (VIEWER+/VERIFIER+)

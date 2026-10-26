@@ -17,8 +17,8 @@ import {
   listKycSubmissions,
   getKycSubmission,
   reviewKycSubmission,
-  getSubmissionDocument,
 } from './admin.service'
+import { createDownloadUrl } from '../../shared/document-store'
 import {
   listUsersSchema,
   grantAdminRoleSchema,
@@ -28,6 +28,8 @@ import {
   listSubmissionsSchema,
   reviewSubmissionSchema,
 } from './admin.schema'
+
+const documentDownloadParams = z.object({ docId: z.string().min(1).max(64) })
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
@@ -169,15 +171,31 @@ export async function reviewKycHandler(
 }
 
 // ─── Document download ────────────────────────────────────────────────────────
+// Bytes live in a private Supabase Storage bucket. The API never proxies them
+// (Vercel caps response bodies at 4.5 MB too); it mints a 60 s signed URL instead.
 
+/** JSON: `{ url, filename, mimeType, sizeBytes, expiresIn }` — preferred for clients. */
+export async function documentUrlHandler(
+  request: FastifyRequest<{ Params: { docId: string } }>,
+  reply: FastifyReply,
+) {
+  const { docId } = documentDownloadParams.parse(request.params)
+  const signed = await createDownloadUrl(docId)
+  request.log.info({ adminId: request.user.sub, docId }, 'admin.document_url_issued')
+  return reply.header('Cache-Control', 'no-store').send(signed)
+}
+
+/**
+ * Back-compat for the existing admin `apiDownload()` (fetch → blob): 302 to the
+ * signed URL. Browsers follow it and drop the Authorization header cross-origin;
+ * the signed URL needs none.
+ */
 export async function downloadDocumentHandler(
   request: FastifyRequest<{ Params: { docId: string } }>,
   reply: FastifyReply,
 ) {
-  const doc = await getSubmissionDocument(request.params.docId)
-  return reply
-    .header('Content-Type', doc.mimeType)
-    .header('Content-Disposition', `attachment; filename="${doc.filename}"`)
-    .header('Content-Length', String(doc.sizeBytes))
-    .send(doc.content)
+  const { docId } = documentDownloadParams.parse(request.params)
+  const signed = await createDownloadUrl(docId)
+  request.log.info({ adminId: request.user.sub, docId }, 'admin.document_download_redirect')
+  return reply.header('Cache-Control', 'no-store').redirect(signed.url, 302)
 }

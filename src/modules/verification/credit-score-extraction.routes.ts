@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify'
-import type { MultipartFile } from '@fastify/multipart'
 import { z } from 'zod'
 import { env } from '../../config/env'
 import { requireAuth } from '../../middleware/requireAuth'
 import { requireBusiness } from '../../middleware/requireAccountType'
-import { BadRequestError, ForbiddenError } from '../../shared/errors'
+import { ForbiddenError } from '../../shared/errors'
+import { uploadIntentBodySchema, documentIdParamsSchema } from '../../shared/document-store'
 import {
-  uploadAndExtractCreditDocument,
+  createCreditUploadIntent,
+  confirmAndExtractCreditDocument,
   getMyCreditDraft,
   patchCreditDraft,
   submitCreditDraft,
@@ -14,6 +15,10 @@ import {
 } from './credit-score-extraction.service'
 
 const docTypeSchema = z.enum(['balance_sheet', 'income_statement', 'cash_flow'])
+const uploadUrlBody = uploadIntentBodySchema.extend({
+  docType: docTypeSchema,
+  period:  z.string().trim().min(1).max(32).optional(),
+})
 const draftIdParams = z.object({ id: z.string().min(1) })
 const patchBody = z.object({
   lineItems: z.record(z.string(), z.union([z.number(), z.string(), z.null()])).optional(),
@@ -23,7 +28,7 @@ const patchBody = z.object({
 /**
  * All routes gated by `env.KYB_CUSTOM_FLOW` (one flag for the whole custom
  * doc-extraction flow). When off, every route returns 403. Wired in app.ts
- * unconditionally so the flag can be flipped in Railway without a redeploy.
+ * unconditionally so the flag can be flipped in Vercel without a redeploy.
  */
 function requireFeatureFlag(): void {
   if (!env.KYB_CUSTOM_FLOW) {
@@ -32,52 +37,33 @@ function requireFeatureFlag(): void {
 }
 
 export async function creditScoreExtractionRoutes(app: FastifyInstance) {
-  // ─── POST /verification/credit-score/upload ─────────────────────────────────
-  app.post('/verification/credit-score/upload', {
+  // ─── POST /verification/credit-score/upload-url ─────────────────────────────
+  // Step 1 of the direct-to-Storage upload (files never transit this API).
+  app.post('/verification/credit-score/upload-url', {
     preHandler: [requireAuth, requireBusiness],
     schema: {
-      tags:     ['Verification'],
-      summary:  'Upload a financial statement and extract line items via Claude (custom flow v1)',
-      consumes: ['multipart/form-data'],
+      tags:    ['Verification'],
+      summary: 'Create a signed Supabase Storage upload URL for a financial statement PDF (custom flow v1)',
     },
     handler: async (request, reply) => {
       requireFeatureFlag()
+      const { docType, period, ...body } = uploadUrlBody.parse(request.body)
+      const intent = await createCreditUploadIntent(request.user.sub, docType as CreditDocType, body, period)
+      return reply.status(201).send(intent)
+    },
+  })
 
-      const userId = request.user.sub
-      const parts  = request.parts()
-
-      let docTypeRaw: string | undefined
-      let periodRaw: string | undefined
-      let file: MultipartFile | undefined
-
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          if (!file) file = part as MultipartFile
-        } else if (part.fieldname === 'docType' && typeof part.value === 'string') {
-          docTypeRaw = part.value
-        } else if (part.fieldname === 'period' && typeof part.value === 'string') {
-          periodRaw = part.value
-        }
-      }
-
-      if (!file)       throw new BadRequestError('Missing PDF upload.')
-      if (!docTypeRaw) throw new BadRequestError('Missing docType field.')
-
-      const docType = docTypeSchema.parse(docTypeRaw) as CreditDocType
-
-      const chunks: Buffer[] = []
-      for await (const chunk of file.file) chunks.push(chunk)
-      const buffer = Buffer.concat(chunks)
-
-      const result = await uploadAndExtractCreditDocument({
-        userId,
-        docType,
-        buffer,
-        filename: file.filename,
-        mimeType: file.mimetype,
-        period:   periodRaw,
-      })
-
+  // ─── POST /verification/credit-score/documents/:documentId/confirm ──────────
+  app.post('/verification/credit-score/documents/:documentId/confirm', {
+    preHandler: [requireAuth, requireBusiness],
+    schema: {
+      tags:    ['Verification'],
+      summary: 'Confirm an uploaded statement, extract line items via Claude, recompute score (custom flow v1)',
+    },
+    handler: async (request, reply) => {
+      requireFeatureFlag()
+      const { documentId } = documentIdParamsSchema.parse(request.params)
+      const result = await confirmAndExtractCreditDocument(request.user.sub, documentId)
       return reply.send(result)
     },
   })

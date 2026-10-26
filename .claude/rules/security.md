@@ -8,14 +8,14 @@
 
 ## Sensitive data
 - Bank account numbers are AES-256-GCM encrypted before storage. Never store plaintext.
-- KYB/KYC identity documents are stored as BYTEA in PostgreSQL — never on public IPFS or S3 without encryption.
+- KYB/KYC/credit-score documents live in the private Supabase Storage bucket `documents` (deny-all client RLS, service role only) — never on public IPFS. Browsers upload via single-object signed URLs; admins read via 60 s signed URLs.
 - Private keys never touch the backend. Signing happens on the client.
 - Never log wallet addresses, account numbers, or document contents.
 
 ## Input validation
 - Every endpoint validates input through Zod before the service layer sees it.
 - File uploads: validate `mimetype` against an allowlist (`image/jpeg`, `image/png`, `application/pdf`).
-- File size: reject uploads over the configured limit in the multipart plugin.
+- File size: 20 MB per document, enforced at upload-intent, by the bucket `file_size_limit`, and on confirm (stored size must equal declared size). Multipart exists only for public Pinata uploads (≤ 4 MB).
 - Never pass raw `request.query` or `request.body` to Prisma.
 
 ## Authorization

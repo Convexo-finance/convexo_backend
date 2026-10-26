@@ -29,14 +29,41 @@ stored bank accounts unreadable, so store it in the password manager), `CRON_SEC
 `DOCS_SECRET`, and a new `KEEPER_PRIVATE_KEY` wallet funded with testnet ETH.
 Set `APP_URL=https://api.convexo.xyz`, `FRONTEND_URL`, `SIWE_ALLOWED_DOMAINS`.
 
-**Known limit — uploads.** Vercel caps a request body at 4.5 MB; `@fastify/multipart` allows
-20 MB × 10 files. Large KYB/credit-score documents will fail until uploads go direct to
-Supabase Storage via signed URLs (replaces the planned R2 move, `src/shared/document-store.ts`).
+**Document storage — Supabase Storage, direct uploads.** Vercel caps request (and response)
+bodies at 4.5 MB, so KYB / KYC / credit-score files never transit the API:
+
+```
+browser ── POST /verification/<flow>/upload-url {docType|fieldName, filename, mimeType, sizeBytes}
+        ◄─ { documentId, upload: { signedUrl, token, path, headers, expiresIn: 7200 } }   (row = PENDING)
+browser ── PUT signedUrl  (raw file body, content-type + x-upsert:false)  ──► Supabase Storage
+browser ── POST /verification/<flow>/documents/:documentId/confirm
+           API downloads with the service role, checks size / content-type / magic bytes,
+           stores sha256, row → UPLOADED; KYB + credit-score then run Claude extraction
+admin   ── GET /admin/submissions/documents/:docId/url  → { url (60 s signed), filename, … }
+           (GET /admin/submissions/documents/:docId still works: 302 to the same signed URL)
+```
+
+`<flow>` = `kyb` | `credit-score` (business, `KYB_CUSTOM_FLOW`) | `kyc` (individual; then
+`POST /verification/kyc/submit` with no body). Limits: 20 MB per file; KYB + credit-score are
+PDF-only, KYC accepts PDF/JPEG/PNG — enforced at intent, by the bucket itself, and on confirm.
+Object keys: `<userId>/<submissionId>/<uuid>-<safeName>`. Bytes are not app-encrypted any more:
+confidentiality = private bucket + deny-all client RLS + service-role key server-only + Supabase
+at-rest encryption. Multipart remains only on the public Pinata route `POST /documents` (≤ 4 MB).
+
+One-time infra per Supabase project (operator, after `prisma migrate deploy`):
+
+```bash
+psql "$DIRECT_URL" -f supabase/storage.sql   # private `documents` bucket + restrictive deny policy
+```
+
+Env: `SUPABASE_URL` (`https://<ref>.supabase.co`), `SUPABASE_SERVICE_ROLE_KEY` (server-only
+secret — Vercel "Sensitive"), optional `SUPABASE_STORAGE_BUCKET` (default `documents`).
+The protocol frontend needs **no** Supabase env var — it PUTs to the `signedUrl` the API returns.
 
 **Cut-over checklist**
 1. Supabase project created (convexo.finance) → `prisma migrate deploy` → advisors clean
 2. Vercel project linked to this repo (root = repo), env vars set, Upstash attached
-3. Preview deploy → `/health`, SIWE login, `/rates`, a KYB upload < 4.5 MB
+3. `supabase/storage.sql` applied; preview deploy → `/health`, SIWE login, `/rates`, a KYB upload **> 4.5 MB** (proves the direct path), admin document download
 4. `api.convexo.xyz` → production; `NEXT_PUBLIC_API_URL` updated in protocol app, admin
 5. Update STATE.md §2, AUTH.md, CLAUDE.md; delete `railway.toml`, `start.sh`, `Dockerfile` (keep docker-compose for local)
 

@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify'
-import type { MultipartFile } from '@fastify/multipart'
 import { z } from 'zod'
 import { env } from '../../config/env'
 import { requireAuth } from '../../middleware/requireAuth'
 import { requireBusiness } from '../../middleware/requireAccountType'
-import { BadRequestError, ForbiddenError } from '../../shared/errors'
+import { ForbiddenError } from '../../shared/errors'
+import { uploadIntentBodySchema, documentIdParamsSchema } from '../../shared/document-store'
 import {
-  uploadAndExtractKybDocument,
+  createKybUploadIntent,
+  confirmAndExtractKybDocument,
   getMyKybDraft,
   patchKybDraft,
   submitKybDraft,
@@ -14,6 +15,7 @@ import {
 } from './kyb-extraction.service'
 
 const docTypeSchema = z.enum(['incorporation', 'articles', 'shareholders'])
+const uploadUrlBody = uploadIntentBodySchema.extend({ docType: docTypeSchema })
 const draftIdParams = z.object({ id: z.string().min(1) })
 const patchBody     = z.record(z.string(), z.unknown())
 
@@ -29,49 +31,36 @@ function requireFeatureFlag(): void {
 }
 
 export async function kybExtractionRoutes(app: FastifyInstance) {
-  // ─── POST /verification/kyb/upload ──────────────────────────────────────────
-  app.post('/verification/kyb/upload', {
+  // ─── POST /verification/kyb/upload-url ──────────────────────────────────────
+  // Step 1 of the direct-to-Storage upload. Returns a signed upload URL; the
+  // browser PUTs the PDF to Supabase Storage (never through this API — Vercel
+  // caps request bodies at 4.5 MB).
+  app.post('/verification/kyb/upload-url', {
     preHandler: [requireAuth, requireBusiness],
     schema: {
-      tags:     ['Verification'],
-      summary:  'Upload a KYB document and extract fields via Claude (custom flow v1)',
-      consumes: ['multipart/form-data'],
+      tags:    ['Verification'],
+      summary: 'Create a signed Supabase Storage upload URL for a KYB PDF (custom flow v1)',
     },
     handler: async (request, reply) => {
       requireFeatureFlag()
+      const { docType, ...body } = uploadUrlBody.parse(request.body)
+      const intent = await createKybUploadIntent(request.user.sub, docType as KybDocType, body)
+      return reply.status(201).send(intent)
+    },
+  })
 
-      const userId = request.user.sub
-      const parts  = request.parts()
-
-      let docTypeRaw: string | undefined
-      let file: MultipartFile | undefined
-
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          // Capture only the first file; ignore extras.
-          if (!file) file = part as MultipartFile
-        } else if (part.fieldname === 'docType' && typeof part.value === 'string') {
-          docTypeRaw = part.value
-        }
-      }
-
-      if (!file)      throw new BadRequestError('Missing PDF upload.')
-      if (!docTypeRaw) throw new BadRequestError('Missing docType field.')
-
-      const docType = docTypeSchema.parse(docTypeRaw) as KybDocType
-
-      const chunks: Buffer[] = []
-      for await (const chunk of file.file) chunks.push(chunk)
-      const buffer = Buffer.concat(chunks)
-
-      const result = await uploadAndExtractKybDocument({
-        userId,
-        docType,
-        buffer,
-        filename: file.filename,
-        mimeType: file.mimetype,
-      })
-
+  // ─── POST /verification/kyb/documents/:documentId/confirm ───────────────────
+  // Step 2: verify the stored object, run Claude extraction, return pre-fill data.
+  app.post('/verification/kyb/documents/:documentId/confirm', {
+    preHandler: [requireAuth, requireBusiness],
+    schema: {
+      tags:    ['Verification'],
+      summary: 'Confirm an uploaded KYB PDF and extract fields via Claude (custom flow v1)',
+    },
+    handler: async (request, reply) => {
+      requireFeatureFlag()
+      const { documentId } = documentIdParamsSchema.parse(request.params)
+      const result = await confirmAndExtractKybDocument(request.user.sub, documentId)
       return reply.send(result)
     },
   })

@@ -4,6 +4,7 @@ import type { DocumentCategory } from '@prisma/client'
 import { uploadDocument, listDocuments, getDocument, deleteDocument } from './documents.service'
 import { listDocumentsSchema } from './documents.schema'
 import { BadRequestError } from '../../shared/errors'
+import { MULTIPART_MAX_FILE_BYTES } from '../../plugins/multipart'
 
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
@@ -14,7 +15,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/webp',
 ])
 
-const MAX_SIZE_BYTES = 20 * 1024 * 1024   // 20 MB
+const MAX_SIZE_BYTES = MULTIPART_MAX_FILE_BYTES // 4 MB — under Vercel's 4.5 MB body cap
 
 export async function upload(request: FastifyRequest, reply: FastifyReply) {
   const parts = request.parts()
@@ -45,7 +46,7 @@ export async function upload(request: FastifyRequest, reply: FastifyReply) {
     throw new BadRequestError(`Unsupported file type: ${mimeType}`)
   }
   if (fileBuffer.length > MAX_SIZE_BYTES) {
-    throw new BadRequestError('File exceeds 20 MB limit.')
+    throw new BadRequestError('File exceeds 4 MB limit.')
   }
 
   const doc = await uploadDocument(

@@ -1,23 +1,12 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
-import type { MultipartFile } from '@fastify/multipart'
 import { db } from '../../config/database'
-import { BadRequestError } from '../../shared/errors'
 import { getAllVerificationsStatus } from './verification.service'
 import { createVeriffSession, getKycStatus } from './veriff.service'
 import { createSumsubApplicant, getKybStatus } from './sumsub.service'
-import {
-  submitCreditScore,
-  getCreditScoreStatus,
-  type CreditScoreDocuments,
-} from './credit-score.service'
-import { submitKyb, type KybFiles } from './kyb-submit.service'
-import { submitKyc, type KycFiles } from './kyc-submit.service'
-import {
-  startKycSchema,
-  startKybSchema,
-  creditScoreSubmitSchema,
-  kybSubmitSchema,
-} from './verification.schema'
+import { getCreditScoreStatus } from './credit-score.service'
+import { createKycUploadIntent, confirmKycDocument, submitKyc } from './kyc-submit.service'
+import { startKycSchema, startKybSchema, kycUploadUrlSchema } from './verification.schema'
+import { uploadIntentBodySchema, documentIdParamsSchema } from '../../shared/document-store'
 
 // ─── GET /verification/status ─────────────────────────────────────────────────
 
@@ -80,58 +69,6 @@ export async function getKybStatusHandler(request: FastifyRequest, reply: Fastif
   return reply.send(result)
 }
 
-// ─── POST /verification/credit-score/submit (Business only) ──────────────────
-
-export async function submitCreditScoreHandler(request: FastifyRequest, reply: FastifyReply) {
-  const user = await db.user.findUniqueOrThrow({
-    where: { id: request.user.sub },
-  })
-
-  // Parse multipart: 3 files + JSON body fields
-  const parts = request.parts()
-
-  const fileBuffers: Record<string, { buffer: Buffer; filename: string; mimetype: string }> = {}
-  const fieldValues: Record<string, string> = {}
-
-  for await (const part of parts) {
-    if (part.type === 'file') {
-      const file = part as MultipartFile
-      const chunks: Buffer[] = []
-      for await (const chunk of file.file) {
-        chunks.push(chunk)
-      }
-      fileBuffers[file.fieldname] = {
-        buffer:   Buffer.concat(chunks),
-        filename: file.filename,
-        mimetype: file.mimetype,
-      }
-    } else {
-      fieldValues[part.fieldname] = part.value as string
-    }
-  }
-
-  // Validate required files
-  if (!fileBuffers['income_statement']) throw new BadRequestError('income_statement file is required')
-  if (!fileBuffers['balance_sheet'])    throw new BadRequestError('balance_sheet file is required')
-  if (!fileBuffers['cash_flow'])        throw new BadRequestError('cash_flow file is required')
-
-  // Parse + validate form fields
-  const formData = creditScoreSubmitSchema.parse({
-    ...fieldValues,
-    employeeCount:  fieldValues['employeeCount']  ? Number(fieldValues['employeeCount'])  : undefined,
-    yearsOperating: fieldValues['yearsOperating'] ? Number(fieldValues['yearsOperating']) : undefined,
-  })
-
-  const docs: CreditScoreDocuments = {
-    incomeStatement: fileBuffers['income_statement'],
-    balanceSheet:    fileBuffers['balance_sheet'],
-    cashFlow:        fileBuffers['cash_flow'],
-  }
-
-  const result = await submitCreditScore(user.id, user.walletAddress, docs, formData)
-  return reply.status(201).send(result)
-}
-
 // ─── GET /verification/credit-score/status (Business only) ───────────────────
 
 export async function getCreditScoreStatusHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -139,79 +76,28 @@ export async function getCreditScoreStatusHandler(request: FastifyRequest, reply
   return reply.send(result)
 }
 
-// ─── POST /verification/kyb/submit (Business only) ───────────────────────────
+// ─── POST /verification/kyc/upload-url (Individual only) ─────────────────────
+// Files go straight to Supabase Storage via the returned signed URL.
 
-export async function submitKybHandler(request: FastifyRequest, reply: FastifyReply) {
-  const user = await db.user.findUniqueOrThrow({ where: { id: request.user.sub } })
+export async function kycUploadUrlHandler(request: FastifyRequest, reply: FastifyReply) {
+  const { fieldName, ...body } = uploadIntentBodySchema.merge(kycUploadUrlSchema).parse(request.body)
+  const intent = await createKycUploadIntent(request.user.sub, fieldName, body)
+  return reply.status(201).send(intent)
+}
 
-  const parts = request.parts()
-  const fileBuffers: Record<string, { buffer: Buffer; filename: string; mimetype: string }> = {}
-  const fieldValues: Record<string, string> = {}
+// ─── POST /verification/kyc/documents/:documentId/confirm (Individual only) ──
 
-  for await (const part of parts) {
-    if (part.type === 'file') {
-      const file = part as MultipartFile
-      const chunks: Buffer[] = []
-      for await (const chunk of file.file) chunks.push(chunk)
-      fileBuffers[file.fieldname] = {
-        buffer:   Buffer.concat(chunks),
-        filename: file.filename,
-        mimetype: file.mimetype,
-      }
-    } else {
-      fieldValues[part.fieldname] = part.value as string
-    }
-  }
-
-  if (!fileBuffers['incorporationCertificate']) throw new BadRequestError('incorporationCertificate is required')
-  if (!fileBuffers['taxDocument'])              throw new BadRequestError('taxDocument is required')
-  if (!fileBuffers['proofOfAddress'])           throw new BadRequestError('proofOfAddress is required')
-  if (!fileBuffers['representativeId'])         throw new BadRequestError('representativeId is required')
-
-  const formData = kybSubmitSchema.parse(fieldValues)
-
-  const files: KybFiles = {
-    incorporationCertificate: fileBuffers['incorporationCertificate'],
-    taxDocument:              fileBuffers['taxDocument'],
-    proofOfAddress:           fileBuffers['proofOfAddress'],
-    representativeId:         fileBuffers['representativeId'],
-    shareholdersCertificate:  fileBuffers['shareholdersCertificate'],
-  }
-
-  const result = await submitKyb(user.id, user.walletAddress, files, formData)
-  return reply.status(201).send(result)
+export async function kycConfirmHandler(request: FastifyRequest, reply: FastifyReply) {
+  const { documentId } = documentIdParamsSchema.parse(request.params)
+  const result = await confirmKycDocument(request.user.sub, documentId)
+  return reply.send(result)
 }
 
 // ─── POST /verification/kyc/submit (Individual only) ─────────────────────────
+// JSON, no body: finalises the DRAFT built from confirmed uploads.
 
 export async function submitKycHandler(request: FastifyRequest, reply: FastifyReply) {
   const user = await db.user.findUniqueOrThrow({ where: { id: request.user.sub } })
-
-  const parts = request.parts()
-  const fileBuffers: Record<string, { buffer: Buffer; filename: string; mimetype: string }> = {}
-
-  for await (const part of parts) {
-    if (part.type === 'file') {
-      const file = part as MultipartFile
-      const chunks: Buffer[] = []
-      for await (const chunk of file.file) chunks.push(chunk)
-      fileBuffers[file.fieldname] = {
-        buffer:   Buffer.concat(chunks),
-        filename: file.filename,
-        mimetype: file.mimetype,
-      }
-    }
-  }
-
-  if (!fileBuffers['governmentId'])   throw new BadRequestError('governmentId is required')
-  if (!fileBuffers['proofOfAddress']) throw new BadRequestError('proofOfAddress is required')
-
-  const files: KycFiles = {
-    governmentId:   fileBuffers['governmentId'],
-    proofOfAddress: fileBuffers['proofOfAddress'],
-    rutDocument:    fileBuffers['rutDocument'],
-  }
-
-  const result = await submitKyc(user.id, user.walletAddress, files)
+  const result = await submitKyc(user.id, user.walletAddress)
   return reply.status(201).send(result)
 }
