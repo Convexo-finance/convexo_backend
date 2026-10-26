@@ -20,3 +20,6 @@ mcp.json
 *.backup
 *.dump
 *.sql.gz
+.vercel
+.env*
+!.env.example
