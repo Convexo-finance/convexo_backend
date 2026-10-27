@@ -311,6 +311,7 @@ model Verification {
 
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -362,6 +363,7 @@ model KybSubmission {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -382,6 +384,7 @@ model KycSubmission {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -424,6 +427,9 @@ model SubmissionDocument {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([kybSubmissionId])
+  @@index([kycSubmissionId])
+  @@index([creditScoreRequestId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -512,6 +518,7 @@ model CreditScoreRequest {
 
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -548,6 +555,7 @@ model BankAccount {
 
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -593,6 +601,7 @@ model Document {
   contractId    String?
 
   createdAt     DateTime         @default(now())
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -638,6 +647,7 @@ model OtcOrder {
 
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -665,6 +675,7 @@ model FundingRequest {
 
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -716,6 +727,7 @@ model NotificationLog {
   error      String?
 
   createdAt  DateTime            @default(now())
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
