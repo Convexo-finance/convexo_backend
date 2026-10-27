@@ -19,6 +19,7 @@ import {
   getKycHandler,
   reviewKycHandler,
   downloadDocumentHandler,
+  documentUrlHandler,
 } from './admin.controller'
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -129,9 +130,15 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   // ─── Document download (works for both KYB and KYC) ──────────────────────────
+  app.get('/admin/submissions/documents/:docId/url', {
+    preHandler: viewer,
+    schema: { tags: ['Admin — KYB'], summary: 'Get a 60 s signed download URL for a submission document' },
+    handler: documentUrlHandler,
+  })
+
   app.get('/admin/submissions/documents/:docId', {
     preHandler: viewer,
-    schema: { tags: ['Admin — KYB'], summary: 'Download a submission document (streams the file)' },
+    schema: { tags: ['Admin — KYB'], summary: 'Download a submission document (302 to a 60 s signed Storage URL)' },
     handler: downloadDocumentHandler,
   })
 }

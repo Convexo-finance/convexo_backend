@@ -233,6 +233,7 @@ export async function listAllCreditScoreRequests(query: {
         },
         // Custom-flow statements (v3.28) — download + extracted-figure review
         documents: {
+          where:  { status: 'UPLOADED' },
           select: {
             id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true,
             extractions: {
@@ -326,7 +327,7 @@ export async function listKybSubmissions(query: { status?: string; limit: number
       take:    query.limit,
       include: {
         user:      submissionUserInclude,
-        documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+        documents: { where: { status: 'UPLOADED' }, select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
       },
     }),
     db.kybSubmission.count({ where }),
@@ -341,6 +342,7 @@ export async function getKybSubmission(id: string) {
     include: {
       user:      submissionUserInclude,
       documents: {
+        where:  { status: 'UPLOADED' },
         select: {
           id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true,
           // Custom-flow extraction (v3.27+) — for the extracted-vs-corrected admin diff
@@ -411,7 +413,7 @@ export async function listKycSubmissions(query: { status?: string; limit: number
       take:    query.limit,
       include: {
         user:      submissionUserInclude,
-        documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+        documents: { where: { status: 'UPLOADED' }, select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
       },
     }),
     db.kycSubmission.count({ where }),
@@ -425,7 +427,7 @@ export async function getKycSubmission(id: string) {
     where:   { id },
     include: {
       user:      submissionUserInclude,
-      documents: { select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
+      documents: { where: { status: 'UPLOADED' }, select: { id: true, fieldName: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true } },
     },
   })
   if (!submission) throw new NotFoundError('KYC submission')
@@ -468,10 +470,3 @@ export async function reviewKycSubmission(
   return updated
 }
 
-// ─── Submission document download ─────────────────────────────────────────────
-
-export async function getSubmissionDocument(docId: string) {
-  const doc = await db.submissionDocument.findUnique({ where: { id: docId } })
-  if (!doc) throw new NotFoundError('Document')
-  return doc
-}

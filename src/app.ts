@@ -6,7 +6,6 @@ import './types'
 // Plugins
 import corsPlugin from './plugins/cors'
 import rateLimitPlugin from './plugins/rateLimit'
-import multipartPlugin from './plugins/multipart'
 import swaggerPlugin from './plugins/swagger'
 import authPlugin from './plugins/auth'
 
@@ -63,11 +62,55 @@ export async function buildApp() {
     }
   })
 
+  // ─── Global error handler ────────────────────────────────────────────────────
+  // Must be set BEFORE any route plugin is registered: each `app.register()`
+  // child context copies the parent's error handler when it is created, so a
+  // handler set afterwards never reached the routes (ZodErrors surfaced as 500).
+  app.setErrorHandler((err: unknown, _request, reply) => {
+    if (err instanceof AppError) {
+      return reply.status(err.statusCode).send({
+        statusCode: err.statusCode,
+        error: err.name,
+        message: err.message,
+        code: err.code,
+      })
+    }
+
+    const error = err as Error & { statusCode?: number }
+
+    // Zod validation errors
+    if (error.name === 'ZodError') {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Validation Error',
+        message: 'Invalid request data',
+        details: JSON.parse(error.message),
+      })
+    }
+
+    // Fastify / plugin client errors (400 validation, 413 body too large,
+    // 415 unsupported media type, 429 rate limit, ...) keep their status.
+    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+      return reply.status(error.statusCode).send({
+        statusCode: error.statusCode,
+        error:      error.statusCode === 400 ? 'Bad Request' : error.name,
+        message:    error.message,
+      })
+    }
+
+    app.log.error(error)
+
+    return reply.status(500).send({
+      statusCode: 500,
+      error: 'Internal Server Error',
+      message: env.NODE_ENV === 'production' ? 'An unexpected error occurred' : error.message,
+    })
+  })
+
   // ─── Plugins ────────────────────────────────────────────────────────────────
   await app.register(swaggerPlugin)
   await app.register(corsPlugin)
   await app.register(rateLimitPlugin)
-  await app.register(multipartPlugin)
   await app.register(authPlugin)
 
   // ─── Health check ────────────────────────────────────────────────────────────
@@ -103,47 +146,6 @@ export async function buildApp() {
   await app.register(veriffWebhookRoutes)
   await app.register(sumsubWebhookRoutes)
   await app.register(n8nWebhookRoutes)
-
-  // ─── Global error handler ────────────────────────────────────────────────────
-  app.setErrorHandler((err: unknown, _request, reply) => {
-    if (err instanceof AppError) {
-      return reply.status(err.statusCode).send({
-        statusCode: err.statusCode,
-        error: err.name,
-        message: err.message,
-        code: err.code,
-      })
-    }
-
-    const error = err as Error & { statusCode?: number }
-
-    // Zod validation errors
-    if (error.name === 'ZodError') {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Validation Error',
-        message: 'Invalid request data',
-        details: JSON.parse(error.message),
-      })
-    }
-
-    // Fastify validation errors
-    if (error.statusCode === 400) {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: error.message,
-      })
-    }
-
-    app.log.error(error)
-
-    return reply.status(500).send({
-      statusCode: 500,
-      error: 'Internal Server Error',
-      message: env.NODE_ENV === 'production' ? 'An unexpected error occurred' : error.message,
-    })
-  })
 
   return app
 }

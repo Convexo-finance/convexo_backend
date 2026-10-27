@@ -1,7 +1,6 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { requireAuth } from '../../middleware/requireAuth'
 import { requireIndividual, requireBusiness } from '../../middleware/requireAccountType'
-import { env } from '../../config/env'
 import { GoneError } from '../../shared/errors'
 import {
   getStatus,
@@ -9,24 +8,20 @@ import {
   getKycStatusHandler,
   startKyb,
   getKybStatusHandler,
-  submitCreditScoreHandler,
   getCreditScoreStatusHandler,
-  submitKybHandler,
+  kycUploadUrlHandler,
+  kycConfirmHandler,
   submitKycHandler,
 } from './verification.controller'
 
 /**
- * P7 cutover guard. Once the custom doc-upload flow is live (`KYB_CUSTOM_FLOW=true`),
- * the legacy manual-submit endpoints are retired atomically: this preHandler 410s
- * them and points callers at the new `/upload` + `/draft` endpoints. While the flag
- * is off, the legacy path keeps working — so there is never a window where both the
- * old and new flows are disabled. See KYB-CREDIT-SCORE-PLAN.md §4.6 / §8.
+ * Legacy multipart submits (manual KYB form, Pinata + n8n credit score) are retired
+ * unconditionally since 2026-10-26: on Vercel a request body cannot exceed 4.5 MB,
+ * so they could not work anyway. The custom doc-upload flow replaces both.
  */
-function retiredWhenCustomFlowOn(replacement: string) {
-  return async (_request: FastifyRequest) => {
-    if (env.KYB_CUSTOM_FLOW) {
-      throw new GoneError(`This endpoint has been retired. Use ${replacement} instead.`)
-    }
+function retired(replacement: string) {
+  return async () => {
+    throw new GoneError(`This endpoint has been retired. Use ${replacement} instead.`)
   }
 }
 
@@ -64,26 +59,37 @@ export async function verificationRoutes(app: FastifyInstance) {
     handler: getKybStatusHandler,
   })
 
-  // ─── KYB Submit — Business (legacy; 410 once KYB_CUSTOM_FLOW is on) ───────────
+  // ─── KYB Submit — Business (legacy multipart; retired) ────────────────────────
   app.post('/verification/kyb/submit', {
-    preHandler: [requireAuth, requireBusiness, retiredWhenCustomFlowOn('POST /verification/kyb/upload')],
-    schema: { tags: ['Verification'], summary: 'Submit KYB documents for manual review (businesses) — legacy, retired when custom flow is enabled' },
-    handler: submitKybHandler,
+    preHandler: [requireAuth, requireBusiness],
+    schema: { tags: ['Verification'], summary: 'Retired (410) — use POST /verification/kyb/upload-url' },
+    handler: retired('POST /verification/kyb/upload-url'),
   })
 
-  // ─── KYC Submit — Individual ─────────────────────────────────────────────────
+  // ─── KYC Submit — Individual (direct-to-Storage uploads) ─────────────────────
+  app.post('/verification/kyc/upload-url', {
+    preHandler: [requireAuth, requireIndividual],
+    schema: { tags: ['Verification'], summary: 'Create a signed Supabase Storage upload URL for a KYC document (individuals)' },
+    handler: kycUploadUrlHandler,
+  })
+
+  app.post('/verification/kyc/documents/:documentId/confirm', {
+    preHandler: [requireAuth, requireIndividual],
+    schema: { tags: ['Verification'], summary: 'Confirm an uploaded KYC document (individuals)' },
+    handler: kycConfirmHandler,
+  })
+
   app.post('/verification/kyc/submit', {
     preHandler: [requireAuth, requireIndividual],
-    schema: { tags: ['Verification'], summary: 'Submit KYC documents for manual review (individuals)' },
+    schema: { tags: ['Verification'], summary: 'Submit confirmed KYC documents for manual review (individuals)' },
     handler: submitKycHandler,
   })
 
-  // ─── Credit Score — Business (legacy; 410 once KYB_CUSTOM_FLOW is on) ─────────
+  // ─── Credit Score — Business (legacy multipart; retired) ──────────────────────
   app.post('/verification/credit-score/submit', {
-    preHandler: [requireAuth, requireBusiness, retiredWhenCustomFlowOn('POST /verification/credit-score/upload')],
-    schema: { tags: ['Verification'], summary: 'Submit financial documents for credit score (businesses) — legacy, retired when custom flow is enabled' },
-    // Multipart — no body schema, handled manually in controller
-    handler: submitCreditScoreHandler,
+    preHandler: [requireAuth, requireBusiness],
+    schema: { tags: ['Verification'], summary: 'Retired (410) — use POST /verification/credit-score/upload-url' },
+    handler: retired('POST /verification/credit-score/upload-url'),
   })
 
   app.get('/verification/credit-score/status', {

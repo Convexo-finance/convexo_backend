@@ -22,3 +22,8 @@ export function getAnthropic(): Anthropic {
 }
 
 export const ANTHROPIC_MODEL = env.ANTHROPIC_MODEL
+
+/** Test seam — inject a fake client (or `null` to reset). Never call from app code. */
+export function setAnthropicForTests(fake: Anthropic | null): void {
+  client = fake
+}

@@ -5,6 +5,26 @@ Format: `## [vX.Y] — YYYY-MM-DD` followed by bullet points grouped by Added / 
 
 ---
 
+## [v3.31] — 2026-10-26 — Direct-to-Supabase-Storage document uploads
+
+### Changed
+- **KYB / KYC / credit-score documents now upload straight from the browser to a private Supabase Storage bucket** via signed upload URLs (Vercel caps request bodies at 4.5 MB). New: `POST /verification/{kyb,credit-score,kyc}/upload-url` + `POST /verification/{kyb,credit-score,kyc}/documents/:documentId/confirm` (confirm verifies size / content-type / magic bytes, records sha256; KYB + credit-score confirm runs Claude extraction and returns the same payload the old `/upload` did). `POST /verification/kyc/submit` is now JSON (no body) and finalises the DRAFT built from confirmed uploads.
+- `SubmissionDocument`: dropped `content BYTEA` (pre-launch, no rows); added `storagePath` (unique), `status` (`PENDING`/`UPLOADED`), `sha256`, `uploadedAt` — migration `20261026000000_submission_document_storage`. Bucket + storage RLS live in `supabase/storage.sql` (not Prisma — `storage.*` is Supabase-owned).
+- Admin document download returns a 60 s signed URL: new `GET /admin/submissions/documents/:docId/url`; the old path now 302s to the signed URL.
+- `@fastify/multipart` is registered only inside `documentsRoutes` (public Pinata uploads), limited to 1 file ≤ 4 MB.
+- New env: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET` (default `documents`).
+
+### Removed
+- Multipart `POST /verification/{kyb,credit-score}/upload`. Legacy `POST /verification/{kyb,credit-score}/submit` now 410 unconditionally (previously only when `KYB_CUSTOM_FLOW=true`); `kyb-submit.service.ts` and the Pinata/n8n legacy credit-score submit deleted.
+
+### Fixed
+- Global error handler was registered after the route plugins, so it never applied to them — Zod validation errors returned **500** instead of 400. It is now set before any route; other 4xx (413/415/429) keep their status.
+- `KYB_CUSTOM_FLOW` used `z.coerce.boolean()`, which turns the string `"false"` into `true`. Now parsed explicitly (`true|false|1|0`).
+- Admin download of custom-flow documents served the AES ciphertext (it sent `content` raw without decrypting) — moot now that bytes live in Storage.
+
+### Added
+- Test harness: `npm test` (node:test + tsx). Unit tests for document-store helpers; in-process `app.inject` integration tests for the upload flow against a disposable Postgres/Redis (`TEST_DATABASE_URL`, `TEST_REDIS_URL`) with a fake Storage bucket and fake Anthropic client.
+
 ## [v3.31] — 2026-10-26 — Auth hardening for serverless (Vercel) + login/logout fixes
 
 ### Fixed

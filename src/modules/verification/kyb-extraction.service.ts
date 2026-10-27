@@ -1,7 +1,7 @@
 import { db } from '../../config/database'
 import { logger } from '../../shared/logger'
 import { BadRequestError } from '../../shared/errors'
-import { storeDocument } from '../../shared/document-store'
+import { createUploadIntent, confirmUpload, type UploadIntentBody } from '../../shared/document-store'
 import { extractFromPdf } from '../../shared/extraction.service'
 
 import { KYB_INCORPORATION_PROMPT } from './prompts/kyb-incorporation.prompt'
@@ -17,9 +17,10 @@ import {
 /**
  * KYB custom flow — replaces Sumsub (see KYB-CREDIT-SCORE-PLAN.md).
  *
- * Sync extraction in v1: upload → store → Claude → save → return. The
- * frontend shows a spinner for 5-30s per doc. v2 moves this to BullMQ on
- * the existing Redis.
+ * Upload is direct-to-Supabase-Storage (Vercel caps request bodies at 4.5 MB):
+ *   upload-url → browser PUTs to Storage → confirm (verify + Claude + save → return).
+ * Extraction stays synchronous in confirm; the frontend shows a spinner for 5-30s
+ * per doc. v2 moves this to a queue.
  *
  * Behind env.KYB_CUSTOM_FLOW — routes enforce the gate.
  */
@@ -68,51 +69,56 @@ const EDITABLE_FIELDS = new Set<string>([
   'controllerRelationship', 'controllerWallet',
 ])
 
-// ─── Inputs ───────────────────────────────────────────────────────────────────
-
-export interface UploadKybDocumentInput {
-  userId:    string
-  docType:   KybDocType
-  buffer:    Buffer
-  filename:  string
-  mimeType:  string
-}
-
 // ─── Public service functions ─────────────────────────────────────────────────
 
 /**
- * Upload a KYB document, store encrypted, run Claude extraction synchronously,
- * persist the result on a DocumentExtraction row, and return the parsed data
- * + confidence map so the caller can pre-fill the form.
+ * Step 1 — get-or-create the DRAFT and issue a signed upload URL for one PDF.
  */
-export async function uploadAndExtractKybDocument(input: UploadKybDocumentInput) {
-  // 1. Get-or-create the DRAFT submission for this user
-  const draftId = await getOrCreateDraft(input.userId)
-
-  // 2. Encrypt + store the PDF
-  const stored = await storeDocument({
-    userId:          input.userId,
-    fieldName:       input.docType,
-    filename:        input.filename,
-    mimeType:        input.mimeType,
-    content:         input.buffer,
-    kybSubmissionId: draftId,
+export async function createKybUploadIntent(userId: string, docType: KybDocType, body: UploadIntentBody) {
+  const submissionId = await getOrCreateDraft(userId)
+  const intent = await createUploadIntent({
+    userId,
+    purpose:   'kyb',
+    fieldName: docType,
+    parent:    { kybSubmissionId: submissionId },
+    ...body,
   })
+  return { submissionId, docType, ...intent }
+}
 
-  // 3. Insert DocumentExtraction row in EXTRACTING state (state-before-side-effect)
+/**
+ * Step 2 — after the browser PUT: verify the stored object, run Claude extraction
+ * synchronously, persist the result on a DocumentExtraction row, and return the
+ * parsed data + confidence map so the caller can pre-fill the form. Calling it
+ * again for the same document re-runs extraction (retry after a failure).
+ */
+export async function confirmAndExtractKybDocument(userId: string, documentId: string) {
+  const doc = await confirmUpload(userId, documentId, 'kyb')
+  const docType = doc.fieldName as KybDocType
+
+  const draft = doc.kybSubmissionId
+    ? await db.kybSubmission.findFirst({
+        where:  { id: doc.kybSubmissionId, userId, status: { in: ['DRAFT', 'EXTRACTING', 'READY_FOR_REVIEW'] } },
+        select: { id: true },
+      })
+    : null
+  if (!draft) throw new BadRequestError('This document is not attached to an active KYB draft.')
+  const draftId = draft.id
+
+  // Insert DocumentExtraction row in EXTRACTING state (state-before-side-effect)
   const job = await db.documentExtraction.create({
     data: {
-      documentId: stored.documentId,
-      docType:    input.docType,
+      documentId: doc.documentId,
+      docType,
       status:     'EXTRACTING',
       startedAt:  new Date(),
     },
     select: { id: true },
   })
 
-  // 4. Call Claude (discriminated dispatch keeps types narrow)
+  // Call Claude (discriminated dispatch keeps types narrow)
   try {
-    const result = await extractForDocType(input.docType, input.buffer)
+    const result = await extractForDocType(docType, doc.buffer)
 
     await db.documentExtraction.update({
       where: { id: job.id },
@@ -138,9 +144,9 @@ export async function uploadAndExtractKybDocument(input: UploadKybDocumentInput)
 
     return {
       submissionId: draftId,
-      documentId:   stored.documentId,
+      documentId:   doc.documentId,
       extractionId: job.id,
-      docType:      input.docType,
+      docType,
       status:       'COMPLETED' as const,
       data:         result.data,
       confidence:   result.confidence,
@@ -148,7 +154,7 @@ export async function uploadAndExtractKybDocument(input: UploadKybDocumentInput)
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
     logger.error(
-      { extractionId: job.id, docType: input.docType, err: errorMessage },
+      { extractionId: job.id, docType, err: errorMessage },
       'kyb.extraction_failed',
     )
     await db.documentExtraction.update({
@@ -168,6 +174,7 @@ export async function getMyKybDraft(userId: string) {
     },
     include: {
       documents: {
+        where:  { status: 'UPLOADED' },
         select: {
           id:        true,
           fieldName: true,

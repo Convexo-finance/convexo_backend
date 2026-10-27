@@ -73,8 +73,15 @@ const envSchema = z.object({
   // Anthropic (KYB + Credit Score PDF extraction via Claude)
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL:   z.string().default('claude-sonnet-4-6'),
-  // Explicit parse: z.coerce.boolean() turns the string 'false' into true.
-  KYB_CUSTOM_FLOW:   z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), // gate the new custom flow
+  // NOTE: z.coerce.boolean() would turn the string "false" into true — parse explicitly.
+  KYB_CUSTOM_FLOW:   z.enum(['true', 'false', '1', '0']).default('false').transform(v => v === 'true' || v === '1'),
+
+  // Supabase Storage (KYB / KYC / credit-score documents — private bucket, service role)
+  // Browser uploads go direct to Storage via signed upload URLs; Vercel caps request
+  // bodies at 4.5 MB so files never transit the API. See supabase/storage.sql.
+  SUPABASE_URL:              z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+  SUPABASE_STORAGE_BUCKET:   z.string().min(3).default('documents'),
 
   // Docs access
   DOCS_SECRET: z.string().min(16).optional(),
