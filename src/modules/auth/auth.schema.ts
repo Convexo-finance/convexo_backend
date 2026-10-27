@@ -29,6 +29,10 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 })
 
+export const logoutSchema = z.object({
+  refreshToken: z.string().min(1).optional(),
+})
+
 export type GetNonceInput = z.infer<typeof getNonceSchema>
 export type VerifyInput = z.infer<typeof verifySchema>
 export type RefreshInput = z.infer<typeof refreshSchema>

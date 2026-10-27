@@ -48,6 +48,12 @@ export async function buildApp() {
   // ─── Raw body capture (needed for webhook HMAC verification) ─────────────────
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
     ;(req as FastifyRequest).rawBody = body as Buffer
+    // Browsers' fetch wrappers send `Content-Type: application/json` on body-less
+    // POSTs (e.g. /auth/logout). JSON.parse('') would 400 those — treat as no body.
+    if ((body as Buffer).length === 0) {
+      done(null, undefined)
+      return
+    }
     try {
       done(null, JSON.parse((body as Buffer).toString()))
     } catch (err) {
